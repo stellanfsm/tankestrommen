@@ -843,25 +843,51 @@ function stripYearFromChildTitleBase(raw: string): string {
     .trim();
 }
 
+function stripCompetitionClassFromChildTitleBase(raw: string): string {
+  return normalizeSpace(raw)
+    .replace(/\b[gjub]\s*-?\s*\d{1,4}\b/gi, "")
+    .replace(/\b(?:f[0-9]{1,2}|j[0-9]{1,2}|g[0-9]{1,2}|u[0-9]{1,2})\b/gi, "")
+    .replace(/\s*,\s*,/g, ",")
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function normalizeWeekdayLabel(raw: string | null | undefined): string {
   const s = normalizeSpace(raw ?? "");
   if (!s) return "dag";
   const n = normalizeNorwegianLetters(s).toLowerCase();
   if (n.includes("mandag")) return "mandag";
+  if (n.includes("monday")) return "mandag";
   if (n.includes("tirsdag")) return "tirsdag";
+  if (n.includes("tuesday")) return "tirsdag";
   if (n.includes("onsdag")) return "onsdag";
+  if (n.includes("wednesday")) return "onsdag";
   if (n.includes("torsdag")) return "torsdag";
+  if (n.includes("thursday")) return "torsdag";
   if (n.includes("fredag")) return "fredag";
+  if (n.includes("friday")) return "fredag";
   if (n.includes("lordag")) return "lørdag";
+  if (n.includes("saturday")) return "lørdag";
   if (n.includes("sondag")) return "søndag";
+  if (n.includes("sunday")) return "søndag";
   return s;
 }
 
 function buildCupChildCalendarTitle(result: AIAnalysisResult, dayLabel: string | null | undefined): string {
   const core = deriveArrangementCoreTitleForLink(result).coreTitle;
-  const base = stripYearFromChildTitleBase(core || result.title || "Arrangement");
+  const base = stripCompetitionClassFromChildTitleBase(
+    stripYearFromChildTitleBase(core || result.title || "Arrangement"),
+  );
   const weekday = normalizeWeekdayLabel(dayLabel);
   return `${base || "Arrangement"} – ${weekday}`;
+}
+
+function buildCupParentCalendarTitle(result: AIAnalysisResult): string {
+  const core = deriveArrangementCoreTitleForLink(result).coreTitle;
+  const cleaned = stripCompetitionClassFromChildTitleBase(normalizeSpace(core || result.title || "Arrangement"));
+  return cleaned || "Arrangement";
 }
 
 const NORWEGIAN_MONTH_NAMES = [
@@ -1469,14 +1495,6 @@ function overlayPreserveTaskTitleTrim(taskText: string, maxLen: number): string 
   return `${stripped.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
 }
 
-/** Grovt «hele dagen»-vindu når cup-/Spond-kilden ikke gir pålitelig klokkeslett (unngå 08:00–09:00). */
-const CUP_UNCERTAIN_DAY_WINDOW = { start: "06:00", end: "22:00" } as const;
-
-function hasReliableClockInTimeField(time: string | null | undefined): boolean {
-  if (!time?.trim()) return false;
-  return /\d{1,2}[.:]\d{2}/.test(time);
-}
-
 /** Tekstblob for fly/reise-heuristikk (modellfelt + rå OCR). */
 function collectTextBlobForTravelInference(result: AIAnalysisResult): string {
   const schedule = Array.isArray(result.schedule) ? result.schedule : [];
@@ -1620,11 +1638,11 @@ type EmbeddedScheduleSegment = {
   date: string;
   dayLabel?: string | null;
   /** Bakoverkompat: eksisterende feltnavn brukt av dagens klient. */
-  start: string;
-  end: string;
+  start: string | null;
+  end: string | null;
   /** Foretrukket feltnavn for import av segmenter. */
-  startTime?: string;
-  endTime?: string;
+  startTime?: string | null;
+  endTime?: string | null;
   /** Oppmøtetid når eksplisitt oppgitt (ellers utelates). */
   attendanceTime?: string;
   title: string;
@@ -1764,8 +1782,14 @@ type PortalEventItem = {
         computedStartTime?: string;
       };
       displayTimeLabel?: string;
+      /** Grov presisjon for tidsfelt i importsvar. */
+      timePrecision?: "exact" | "start_only" | "date_only";
       /** Speiler `event.requiresManualTimeReview` for metadata-lesere. */
       requiresManualTimeReview?: boolean;
+      /** Konkurranseklasse/lagkode, f.eks. J2013/G12. */
+      competitionClass?: string | null;
+      /** Målgruppe som AI har lest ut (lagres i metadata fremfor child-title). */
+      targetGroup?: string | null;
       documentExtractedPersonName?: string;
       passengerName?: string;
       travel?: {
@@ -1819,6 +1843,23 @@ type CupProposalItemDebug = {
   embeddedScheduleDailyTopLevelSuppressed?: number;
   /** Segment-bygging med egne korte notater er beholdt. */
   embeddedScheduleSegmentNotesRetained?: boolean;
+  /** Rått antall segmenter før parent/child-fletting. */
+  rawChildSegmentCount?: number;
+  /** Endelig antall top-level child-events i items[]. */
+  finalChildSegmentCount?: number;
+  /** Segmenttitler før event-sanitizing (fra embeddedSchedule). */
+  childTitlesRaw?: string[];
+  /** Endelige child-event titler etter sanitizing. */
+  childTitlesFinal?: string[];
+  /** Child-datoer som ble sendt i top-level items[]. */
+  childDates?: string[];
+  childEndTimeSources?: Array<string | null>;
+  childTimePrecisions?: Array<string | null>;
+  /** Parent nøkkel-felt for enklere klientdiagnose. */
+  arrangementStableKey?: string;
+  arrangementBlockGroupId?: string;
+  /** Konkurranseklasse/målgruppe (f.eks. J2013) som ble brukt i core-title/key. */
+  competitionClassTargetGroup?: string | null;
 };
 
 /** Diagnostikk for portal-task (Spond/cup-frist og tittelkontekst). */
@@ -3038,8 +3079,8 @@ function buildCupEmbeddedScheduleSegment(args: {
   deadlinesForEvent: string[];
   conditionalDay: boolean;
 }): EmbeddedScheduleSegment {
-  let start: string;
-  let end: string;
+  let start: string | null = null;
+  let end: string | null = null;
   if (args.explicitStartEnd) {
     start = args.explicitStartEnd.start;
     end = args.explicitStartEnd.end;
@@ -3058,20 +3099,14 @@ function buildCupEmbeddedScheduleSegment(args: {
       end = r.end;
     } else if (r.start) {
       start = r.start;
-      end = r.end ?? CUP_UNCERTAIN_DAY_WINDOW.end;
+      end = null;
     } else {
       const fe = extractStartEndFromScheduleTime(args.day.time);
-      start = fe.start ?? CUP_UNCERTAIN_DAY_WINDOW.start;
-      end = fe.end ?? CUP_UNCERTAIN_DAY_WINDOW.end;
+      start = fe.start;
+      end = fe.end;
     }
   }
-  const title = buildEventProposalTitle(args.result, args.titleSuffix, {
-    rememberItems: args.rememberForEvent,
-    deadlines: args.deadlinesForEvent,
-    notes: args.notesOnlyForEvent,
-    highlights: args.highlightsForEventFinal,
-    details: args.detailsForEvent,
-  });
+  const title = buildCupChildCalendarTitle(args.result, args.titleSuffix);
 
   const seen = new Set<string>();
   const linesOut: string[] = [];
@@ -3940,7 +3975,11 @@ async function buildProposalItems(
     const eventTitleRaw =
       tf?.proposedTitle ?? buildEventProposalTitle(result, titleSuffix, dayContext);
     const eventTitle =
-      !tf && cupProposalDebug ? buildCupChildCalendarTitle(result, titleSuffix) : eventTitleRaw;
+      !tf && cupProposalDebug
+        ? cupProposalDebug.embeddedScheduleParentMergeRestored
+          ? buildCupParentCalendarTitle(result)
+          : buildCupChildCalendarTitle(result, titleSuffix)
+        : eventTitleRaw;
     const eventTitleSanitized = sanitizeCalendarLikeTitle(eventTitle, 60);
     const enforceFlightNoTfFallback =
       !tf &&
@@ -4007,6 +4046,7 @@ async function buildProposalItems(
     }
     if (result.location) item.event.location = result.location;
     const arrLink = buildArrangementImportLinkMetadata(result, date, arrangementEndDateIso ?? null);
+    const targetGroupNorm = normalizeSpace(result.targetGroup || "") || null;
     item.event.metadata = {
       arrangementStableKey: arrLink.arrangementStableKey,
       arrangementCoreTitle: arrLink.arrangementCoreTitle,
@@ -4067,6 +4107,12 @@ async function buildProposalItems(
             ...(nonFlightResolved.requiresManualTimeReview && !nonFlightResolved.end
               ? { displayTimeLabel: "Sluttid ikke oppgitt" }
               : {}),
+            timePrecision:
+              nonFlightResolved.start && nonFlightResolved.end
+                ? ("exact" as const)
+                : nonFlightResolved.start
+                  ? ("start_only" as const)
+                  : ("date_only" as const),
             requiresManualTimeReview: nonFlightResolved.requiresManualTimeReview,
           }
         : {}),
@@ -4089,6 +4135,12 @@ async function buildProposalItems(
               passengerName: null,
               flightNumber: null,
             },
+          }
+        : {}),
+      ...(!tf && targetGroupNorm
+        ? {
+            competitionClass: targetGroupNorm,
+            targetGroup: targetGroupNorm,
           }
         : {}),
     };
@@ -4204,14 +4256,7 @@ async function buildProposalItems(
       const conditionalDay = cupLike && isConditionalTournamentText(dayBlob);
       const titleSuffix = day.dayLabel;
 
-      let explicitStartEnd: { start: string; end: string } | null = null;
-      if (cupLike) {
-        if (conditionalDay) {
-          explicitStartEnd = { ...CUP_UNCERTAIN_DAY_WINDOW };
-        } else if (!hasReliableClockInTimeField(day.time)) {
-          explicitStartEnd = { ...CUP_UNCERTAIN_DAY_WINDOW };
-        }
-      }
+      const explicitStartEnd: { start: string; end: string } | null = null;
       const defaultTimeSuppressed = Boolean(explicitStartEnd);
 
       const taskCandidates = [
@@ -4559,7 +4604,8 @@ async function buildProposalItems(
       const parentTitleSuffix = formatNorwegianShortDateRange(firstSeg.date, lastSeg.date);
 
       /** Parent skal ikke være syntetisk heldagsblokk; bruk første segments tid som nøytral anchor. */
-      const parentExplicitStartEnd = { start: firstSeg.start, end: firstSeg.end } as const;
+      const parentExplicitStartEnd =
+        firstSeg.start && firstSeg.end ? ({ start: firstSeg.start, end: firstSeg.end } as const) : null;
 
       const parentNoteParts: string[] = [];
       const desc = normalizeSpace(result.description || "");
@@ -4580,6 +4626,9 @@ async function buildProposalItems(
           ? cupMergeBuffer.filter((it) => it.kind === "event").length
           : 0,
         embeddedScheduleSegmentNotesRetained: true,
+        rawChildSegmentCount: cupEmbeddedScheduleSegments.length,
+        childTitlesRaw: cupEmbeddedScheduleSegments.map((s) => s.title),
+        competitionClassTargetGroup: normalizeSpace(result.targetGroup || "") || null,
       };
 
       const cupParentEvent = buildEventItem(
@@ -4641,6 +4690,26 @@ async function buildProposalItems(
           childSegmentsGenerated: childSegments.length > 0,
           childSegmentCount: childSegments.length,
         };
+        if (cupParentEvent.event.metadata.cupProposalDebug) {
+          cupParentEvent.event.metadata.cupProposalDebug.finalChildSegmentCount =
+            childSegments.length;
+          cupParentEvent.event.metadata.cupProposalDebug.childTitlesFinal = childSegments.map(
+            (c) => c.event.title,
+          );
+          cupParentEvent.event.metadata.cupProposalDebug.childDates = childSegments.map(
+            (c) => c.event.date,
+          );
+          cupParentEvent.event.metadata.cupProposalDebug.childEndTimeSources = childSegments.map(
+            (c) => (c.event.metadata?.endTimeSource as string | undefined) ?? null,
+          );
+          cupParentEvent.event.metadata.cupProposalDebug.childTimePrecisions = childSegments.map(
+            (c) => (c.event.metadata?.timePrecision as string | undefined) ?? null,
+          );
+          cupParentEvent.event.metadata.cupProposalDebug.arrangementStableKey =
+            cupParentEvent.event.metadata.arrangementStableKey;
+          cupParentEvent.event.metadata.cupProposalDebug.arrangementBlockGroupId =
+            cupParentEvent.event.metadata.arrangementBlockGroupId;
+        }
       }
       items.unshift(cupParentEvent);
       if (cupMergeBuffer) {
@@ -4678,15 +4747,46 @@ async function buildProposalItems(
         else if (isSchoolPlanBundleContext(result, weekPlanLike))
           skipReason = "school_plan_bundle_context";
         host.event.metadata.cupProposalDebug.embeddedScheduleParentMergeSkippedReason = skipReason;
+        host.event.metadata.cupProposalDebug.rawChildSegmentCount = cupEmbeddedScheduleSegments.length;
+        host.event.metadata.cupProposalDebug.childTitlesRaw = cupEmbeddedScheduleSegments.map(
+          (s) => s.title,
+        );
+        host.event.metadata.cupProposalDebug.competitionClassTargetGroup =
+          normalizeSpace(result.targetGroup || "") || null;
       }
       if (host) attachEmbeddedScheduleToHostEvent(host, false);
     }
 
     if (cupLike) {
+      const finalChildEvents = items.filter(
+        (x): x is PortalEventItem =>
+          x.kind === "event" && Boolean(x.event.metadata?.isArrangementChild),
+      );
       for (const it of items) {
         if (it.kind !== "event" || !it.event.metadata?.cupProposalDebug) continue;
         it.event.metadata.cupProposalDebug.actionableParentTasksDeduped =
           actionableParentTasksDeduped;
+        it.event.metadata.cupProposalDebug.finalChildSegmentCount = finalChildEvents.length;
+        if (!it.event.metadata.cupProposalDebug.childTitlesFinal) {
+          it.event.metadata.cupProposalDebug.childTitlesFinal = finalChildEvents.map(
+            (c) => c.event.title,
+          );
+        }
+        if (!it.event.metadata.cupProposalDebug.childDates) {
+          it.event.metadata.cupProposalDebug.childDates = finalChildEvents.map(
+            (c) => c.event.date,
+          );
+        }
+        if (!it.event.metadata.cupProposalDebug.childEndTimeSources) {
+          it.event.metadata.cupProposalDebug.childEndTimeSources = finalChildEvents.map(
+            (c) => (c.event.metadata?.endTimeSource as string | undefined) ?? null,
+          );
+        }
+        if (!it.event.metadata.cupProposalDebug.childTimePrecisions) {
+          it.event.metadata.cupProposalDebug.childTimePrecisions = finalChildEvents.map(
+            (c) => (c.event.metadata?.timePrecision as string | undefined) ?? null,
+          );
+        }
       }
     }
   }
@@ -5300,7 +5400,55 @@ function dedupeLinesByNormalizedKey(lines: string[]): string[] {
 }
 
 function normalizeChildSegmentTitleForDedupe(title: string): string {
-  return normalizeNorwegianLetters(normalizeSpace(title)).toLowerCase();
+  const weekday = normalizeWeekdayLabel(title.split("–").slice(-1)[0] ?? title);
+  return normalizeNorwegianLetters(normalizeSpace(title))
+    .toLowerCase()
+    .replace(/\b20\d{2}\b/g, "")
+    .replace(/\b\d{1,2}\.\s*(?:januar|februar|mars|april|mai|juni|juli|august|september|oktober|november|desember)\b/g, "")
+    .replace(/\b[gjub]\s*-?\s*\d{1,4}\b/g, "")
+    .replace(/\b(?:f[0-9]{1,2}|j[0-9]{1,2}|g[0-9]{1,2}|u[0-9]{1,2})\b/g, "")
+    .replace(/\b\d{1,2}\b/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*[–—-]\s*/g, " – ")
+    .trim()
+    .replace(/(^| – )(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|lordag|søndag|sondag)$/i, `$1${weekday}`);
+}
+
+function inferChildActivityKey(item: PortalEventItem): string {
+  const t = normalizeChildSegmentTitleForDedupe(item.event.title ?? "");
+  const notesHead = normalizeNorwegianLetters(
+    normalizeSpace((item.event.notes ?? "").split(/\n/)[0] ?? ""),
+  )
+    .toLowerCase()
+    .replace(/\b[gjub]\s*-?\s*\d{1,4}\b/g, "")
+    .replace(/\b\d{1,2}\b/g, "")
+    .trim();
+  return `${t}|${notesHead}`;
+}
+
+function timeSourceScore(v: unknown): number {
+  if (v === "explicit") return 3;
+  if (v === "computed_from_duration") return 2;
+  if (v === "missing_or_unreadable") return 0;
+  return 1;
+}
+
+function chooseBetterTime(current: PortalEventItem, incoming: PortalEventItem): void {
+  const currMeta = current.event.metadata ?? {};
+  const inMeta = incoming.event.metadata ?? {};
+  const currStartScore = timeSourceScore(currMeta.startTimeSource);
+  const inStartScore = timeSourceScore(inMeta.startTimeSource);
+  const currEndScore = timeSourceScore(currMeta.endTimeSource);
+  const inEndScore = timeSourceScore(inMeta.endTimeSource);
+
+  if ((!current.event.start && incoming.event.start) || inStartScore > currStartScore) {
+    current.event.start = incoming.event.start;
+    current.event.metadata = { ...(current.event.metadata ?? {}), startTimeSource: inMeta.startTimeSource };
+  }
+  if ((!current.event.end && incoming.event.end) || inEndScore > currEndScore) {
+    current.event.end = incoming.event.end;
+    current.event.metadata = { ...(current.event.metadata ?? {}), endTimeSource: inMeta.endTimeSource };
+  }
 }
 
 function mergeEventNotesUnique(a?: string, b?: string): string | undefined {
@@ -5336,13 +5484,12 @@ function dedupeArrangementChildEvents(items: PortalProposalItem[]): PortalPropos
       continue;
     }
 
+    const activityKey = inferChildActivityKey(item);
     const key = [
       md.arrangementBlockGroupId ?? "",
       md.parentArrangementStableKey ?? "",
       item.event.date ?? "",
-      item.event.start ?? "",
-      item.event.end ?? "",
-      normalizeChildSegmentTitleForDedupe(item.event.title ?? ""),
+      activityKey,
     ].join("|");
     const normalizedTitle = normalizeChildSegmentTitleForDedupe(item.event.title ?? "");
     const dayToken = normalizeWeekdayLabel(
@@ -5352,6 +5499,7 @@ function dedupeArrangementChildEvents(items: PortalProposalItem[]): PortalPropos
       md.parentArrangementStableKey ?? md.arrangementBlockGroupId ?? "",
       item.event.date ?? "",
       dayToken,
+      activityKey,
     ].join("|");
 
     const existing = seen.get(key);
@@ -5364,8 +5512,17 @@ function dedupeArrangementChildEvents(items: PortalProposalItem[]): PortalPropos
     }
 
     const target = existing ?? existingByDay!;
+    chooseBetterTime(target, item);
     const mergedNotes = mergeEventNotesUnique(target.event.notes, item.event.notes);
     if (mergedNotes) target.event.notes = mergedNotes;
+    if (item.event.metadata?.competitionClass && !target.event.metadata?.competitionClass) {
+      target.event.metadata = target.event.metadata ?? {};
+      target.event.metadata.competitionClass = item.event.metadata.competitionClass;
+    }
+    if (item.event.metadata?.targetGroup && !target.event.metadata?.targetGroup) {
+      target.event.metadata = target.event.metadata ?? {};
+      target.event.metadata.targetGroup = item.event.metadata.targetGroup;
+    }
     if (item.event.metadata?.isTentative) {
       target.event.metadata = target.event.metadata ?? {};
       target.event.metadata.isTentative = true;
