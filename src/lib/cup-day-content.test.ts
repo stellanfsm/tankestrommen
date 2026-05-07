@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCupStructuredDayContent,
+  enrichCupStructuredContentWithResolvedTiming,
   formatCupEventNotesFlat,
   isNoiseFragment,
 } from "./cup-day-content";
@@ -104,5 +105,64 @@ describe("buildCupStructuredDayContent (Høstcupen-regresjon)", () => {
     expect(isNoiseFragment("og")).toBe(true);
     expect(isNoiseFragment("spist litt")).toBe(true);
     expect(isNoiseFragment("- overtrekksklær")).toBe(true);
+  });
+
+  it("beriking: vindu 10:00–12:00 gir én highlight med semantisk label og (foreløpig)", () => {
+    const structured = buildCupStructuredDayContent({
+      ...base,
+      date: "2026-09-20",
+      childTitle: "Høstcupen – søndag",
+      details: null,
+      highlights: [],
+      notes: [
+        "A-sluttspill: første kamp mellom kl. 10:00 og 12:00 dersom vi går videre.",
+        "10:00 og",
+        "12:00 og",
+      ],
+      rememberItems: [],
+      deadlines: [],
+    });
+    const enriched = enrichCupStructuredContentWithResolvedTiming(structured, {
+      date: "2026-09-20",
+      parentTitleNorm: "hostcupen",
+      childTitleNorm: "hostcupen sondag",
+      sourceBlob:
+        "A-sluttspill: første kamp mellom kl. 10:00 og 12:00 dersom vi går videre.\n10:00 og\n12:00 og",
+      attendanceTime: null,
+      orderedMatchTimes: ["10:00", "12:00"],
+      daySegmentStart: null,
+      daySegmentEnd: null,
+      timeWindow: { earliestStart: "10:00", latestStart: "12:00" },
+      timePrecision: "time_window",
+      tentative: true,
+    });
+    expect(enriched.highlights).toContain("10:00–12:00 Første sluttspillkamp (foreløpig)");
+    expect(enriched.highlights.some((h) => /^10:00\s/.test(h) && !h.includes("–"))).toBe(false);
+    expect(enriched.highlights.some((h) => /^12:00\s/.test(h) && !h.includes("–"))).toBe(false);
+  });
+
+  it("beriking: én kamptid + note uten inline tid → highlight med klokkeslett + semantikk", () => {
+    const structured = buildCupStructuredDayContent({
+      ...base,
+      details: "Første kamp i Nadderud Arena. Oppvarming som vanlig.",
+      highlights: [],
+      notes: [],
+      rememberItems: [],
+      deadlines: [],
+    });
+    const enriched = enrichCupStructuredContentWithResolvedTiming(structured, {
+      date: "2026-09-18",
+      parentTitleNorm: "hostcupen",
+      childTitleNorm: "hostcupen fredag",
+      sourceBlob: "Første kamp i Nadderud Arena. Oppvarming som vanlig.\n17:30",
+      attendanceTime: null,
+      orderedMatchTimes: ["17:30"],
+      daySegmentStart: "17:30",
+      daySegmentEnd: "18:10",
+      timeWindow: null,
+      timePrecision: "exact",
+      tentative: false,
+    });
+    expect(enriched.highlights.some((h) => h === "17:30 Første kamp")).toBe(true);
   });
 });

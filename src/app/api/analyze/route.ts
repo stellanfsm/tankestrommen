@@ -50,6 +50,7 @@ import {
 } from "@/lib/braintrust-analyze-telemetry";
 import {
   buildCupStructuredDayContent,
+  enrichCupStructuredContentWithResolvedTiming,
   formatCupEventNotesFlat,
   parseCupTimeWindow,
 } from "@/lib/cup-day-content";
@@ -4751,6 +4752,40 @@ async function buildProposalItems(
           deadlinesForEvent,
           conditionalDay,
         });
+        if (structuredDayContent && cupTiming) {
+          const parentTitleForTiming = buildCupParentCalendarTitle(result);
+          const childTitleForTiming = buildCupChildCalendarTitle(result, titleSuffix);
+          const timingBlob = [
+            day.time ?? "",
+            detailsForEvent ?? "",
+            ...highlightsForEventFinal,
+            ...fNotesRaw,
+            ...fRemember,
+            ...deadlinesForEvent,
+          ].join("\n");
+          structuredDayContent = enrichCupStructuredContentWithResolvedTiming(structuredDayContent, {
+            date: isoDate,
+            parentTitleNorm: cupLineNormKey(parentTitleForTiming),
+            childTitleNorm: cupLineNormKey(childTitleForTiming),
+            sourceBlob: timingBlob,
+            attendanceTime: cupTiming.attendanceTime,
+            orderedMatchTimes: extractCupMatchTimes(timingBlob),
+            daySegmentStart: cupTiming.start,
+            daySegmentEnd: cupTiming.end,
+            timeWindow: cupTiming.timeWindow ?? null,
+            timePrecision: cupTiming.timePrecision,
+            tentative:
+              conditionalDay ||
+              cupTiming.timePrecision === "time_window" ||
+              (Boolean(cupTiming.requiresManualTimeReview) && cupTiming.timePrecision !== "exact"),
+          });
+          highlightsForEventFinal = structuredDayContent.highlights;
+          notesOnlyForEvent = [
+            ...structuredDayContent.logisticsNotes,
+            ...structuredDayContent.generalNotes,
+            ...structuredDayContent.uncertaintyNotes,
+          ];
+        }
       }
 
       const removedFragmentNotes = rawNotesBeforeCleanup.filter((n) => {

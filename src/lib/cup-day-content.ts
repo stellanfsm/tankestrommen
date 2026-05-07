@@ -3,6 +3,15 @@
  * Holdes i egen modul for testbarhet uten å laste hele analyze-route.
  */
 
+import {
+  buildTimeWindowHighlightLine,
+  defaultMatchLabelByIndex,
+  inferTimedActivityLabelFromText,
+  inferTimeWindowActivityLabel,
+  lineSuggestsTimedMainActivity,
+  normKeyTimed,
+} from "@/lib/timed-activity-highlights";
+
 function normalizeSpace(input: string): string {
   return input.replace(/\s+/g, " ").trim();
 }
@@ -211,15 +220,24 @@ function cleanupCupHighlight(
   if (loc) location = normalizeSpace(loc[1]);
   label = stripLocationOnlyFragment(label);
   if (isCupParentPracticalLine(label)) return null;
-  if (!label || isNoiseFragment(label) || highlightLabelIsTimeWindowJunk(label)) return null;
-  if (!label) {
-    if (/\boppm[oø]te\b/i.test(input)) label = "Oppmøte";
-    else if (/\bforste\s+kamp\b/i.test(normalizeNorwegianLetters(input))) label = "Første kamp";
-    else if (/\bandre\s+kamp\b/i.test(normalizeNorwegianLetters(input))) label = "Andre kamp";
-    else if (/\bkamp\b/i.test(input)) label = "Kamp";
-    else if (/\bavreise\b/i.test(input)) label = "Avreise";
+  if (!label || label.length < 2 || isNoiseFragment(label) || highlightLabelIsTimeWindowJunk(label)) {
+    const inferred =
+      inferTimedActivityLabelFromText(input) ??
+      (/\boppm[oø]te\b/i.test(input)
+        ? "Oppmøte"
+        : /\bforste\s+kamp\b/.test(normalizeNorwegianLetters(input))
+          ? "Første kamp"
+          : /\bandre\s+kamp\b/.test(normalizeNorwegianLetters(input))
+            ? "Andre kamp"
+            : /\bkamp\b/.test(input)
+              ? "Kamp"
+              : /\bavreise\b/.test(input)
+                ? "Avreise"
+                : null);
+    if (inferred) label = inferred;
   }
-  if (!label || titleBlocklist.has(cupLineNormKey(label))) return null;
+  if (!label || isNoiseFragment(label) || highlightLabelIsTimeWindowJunk(label)) return null;
+  if (titleBlocklist.has(cupLineNormKey(label))) return null;
   return { time, label, ...(location ? { location } : {}) };
 }
 
@@ -402,7 +420,12 @@ export function buildCupStructuredDayContent(input: {
       uncertaintyNotes.push(s);
       return;
     }
-    if (/\b(hall|arena|skolehall|mellom\s+kampene|oppvarming|rydd|samlet|garderobe|hjemreise)\b/i.test(s)) {
+    const n = normalizeNorwegianLetters(s);
+    const venueOrLogistics =
+      /\b(hall|arena|skolehall|mellom\s+kampene|oppvarming|rydd|samlet|garderobe|hjemreise)\b/i.test(
+        n,
+      );
+    if (venueOrLogistics && !lineSuggestsTimedMainActivity(s)) {
       logisticsNotes.push(s);
       return;
     }
@@ -510,6 +533,175 @@ export function buildCupStructuredDayContent(input: {
     removedDuplicateHighlights,
     removedFragmentNotes: dedupeStableOrder(removedFragmentNotes),
     timeWindowCandidates,
+  };
+}
+
+export type CupTimingEnrichmentInput = {
+  date: string;
+  /** `cupLineNormKey` av foreldre- og child-tittel */
+  parentTitleNorm: string;
+  childTitleNorm: string;
+  /** Rå tekst for aktivitetsforståelse (notater, highlights, detaljer) */
+  sourceBlob: string;
+  attendanceTime: string | null;
+  /** Kamp-/programtider i rekkefølge */
+  orderedMatchTimes: string[];
+  daySegmentStart: string | null;
+  daySegmentEnd: string | null;
+  timeWindow: { earliestStart: string; latestStart: string } | null;
+  timePrecision: "exact" | "start_only" | "date_only" | "time_window";
+  tentative: boolean;
+};
+
+function highlightCoversTime(list: string[], hhmm: string): boolean {
+  for (const h of list) {
+    if (h.startsWith(`${hhmm} `)) return true;
+    if (h.startsWith(`${hhmm}–`) || h.startsWith(`${hhmm}-`)) return true;
+    const m = /^(\d{2}:\d{2})[–-](\d{2}:\d{2})\s/.exec(h);
+    if (m && m[1]! <= hhmm && hhmm <= m[2]!) return true;
+  }
+  return false;
+}
+
+function isTitleLikeHighlightLine(line: string, titleBlock: Set<string>): boolean {
+  const core = line.replace(/\s*\(foreløpig\)\s*$/i, "").trim();
+  const noTime = core.replace(/^\d{2}:\d{2}(?:[–-]\d{2}:\d{2})?\s+/, "").trim();
+  if (!noTime) return false;
+  return titleBlock.has(cupLineNormKey(noTime)) || titleBlock.has(normKeyTimed(noTime));
+}
+
+function highlightIsJunkAtWindowEdge(line: string, edge: Set<string>): boolean {
+  const m = /^(\d{2}:\d{2})\s+(.+)$/.exec(line);
+  if (!m || !edge.has(m[1]!)) return false;
+  const rest = (m[2] || "").trim();
+  if (highlightLabelIsTimeWindowJunk(rest)) return true;
+  if (/^og\b/i.test(rest)) return true;
+  if (/\bforel[øo]pig\b/i.test(rest) && rest.length < 24) return true;
+  return false;
+}
+
+/**
+ * Beriker strukturerte highlights med anker-tider fra kalender-/blob-resolving,
+ * uten å bruke event-tittel som highlight-label.
+ */
+export function enrichCupStructuredContentWithResolvedTiming(
+  content: CupStructuredDayContent,
+  enrichment: CupTimingEnrichmentInput,
+): CupStructuredDayContent {
+  const titleBlock = new Set(
+    [enrichment.parentTitleNorm, enrichment.childTitleNorm].filter((x) => x && x.length > 0),
+  );
+  const blob = enrichment.sourceBlob;
+
+  let highlights = content.highlights.filter((h) => !isTitleLikeHighlightLine(h, titleBlock));
+  let logisticsNotes = [...content.logisticsNotes];
+  let generalNotes = [...content.generalNotes];
+
+  const window = enrichment.timeWindow;
+  if (window && enrichment.timePrecision === "time_window") {
+    const label = inferTimeWindowActivityLabel(blob);
+    const line = buildTimeWindowHighlightLine({
+      earliest: window.earliestStart,
+      latest: window.latestStart,
+      label,
+      tentative: enrichment.tentative,
+    });
+    const hasWindow = highlights.some(
+      (h) =>
+        h.includes(`${window.earliestStart}–${window.latestStart}`) ||
+        h.includes(`${window.earliestStart}-${window.latestStart}`),
+    );
+    if (!hasWindow) highlights.unshift(line);
+
+    const edge = new Set([window.earliestStart, window.latestStart]);
+    highlights = highlights.filter((h) => !highlightIsJunkAtWindowEdge(h, edge));
+  }
+
+  const suppressTimes =
+    window && enrichment.timePrecision === "time_window"
+      ? new Set([window.earliestStart, window.latestStart])
+      : null;
+
+  const times = enrichment.orderedMatchTimes.filter((t) => !suppressTimes?.has(t));
+
+  for (let i = 0; i < times.length; i++) {
+    const t = times[i]!;
+    if (highlightCoversTime(highlights, t)) continue;
+    const labelSingle = inferTimedActivityLabelFromText(blob);
+    const label =
+      times.length === 1 ? (labelSingle ?? defaultMatchLabelByIndex(0)) : defaultMatchLabelByIndex(i);
+    if (!label || titleBlock.has(normKeyTimed(label))) continue;
+    highlights.push(`${t} ${label}`);
+  }
+
+  const att = enrichment.attendanceTime;
+  if (att && !highlightCoversTime(highlights, att)) {
+    const firstMatch = enrichment.orderedMatchTimes[0];
+    if (!firstMatch || att !== firstMatch || /\boppm[oø]te\b/i.test(blob)) {
+      highlights.push(`${att} Oppmøte`);
+    }
+  }
+
+  const noPointHighlight = !highlights.some((h) => /^\d{2}:\d{2}\s+/.test(h) && !/\d{2}:\d{2}[–-]\d{2}:\d{2}/.test(h));
+  if (
+    !window &&
+    noPointHighlight &&
+    enrichment.daySegmentStart &&
+    enrichment.timePrecision !== "time_window"
+  ) {
+    const label = inferTimedActivityLabelFromText(blob);
+    if (
+      label &&
+      !titleBlock.has(normKeyTimed(label)) &&
+      !highlightCoversTime(highlights, enrichment.daySegmentStart)
+    ) {
+      highlights.push(`${enrichment.daySegmentStart} ${label}`);
+    }
+  }
+
+  const seenH = new Set<string>();
+  highlights = highlights.filter((h) => {
+    const k = cupLineNormKey(h);
+    if (!k || seenH.has(k)) return false;
+    seenH.add(k);
+    return true;
+  });
+
+  const promoteLabelKeys = new Set<string>();
+  for (const h of highlights) {
+    const m = /^\d{2}:\d{2}(?:[–-]\d{2}:\d{2})?\s+(.+)$/.exec(h);
+    if (m)
+      promoteLabelKeys.add(normKeyTimed(m[1]!.replace(/\s*\([^)]+\)\s*$/, "").trim()));
+  }
+
+  const stripPromoted = (arr: string[]) =>
+    arr.filter((line) => {
+      const lab = inferTimedActivityLabelFromText(line);
+      if (!lab) return true;
+      if (promoteLabelKeys.has(normKeyTimed(lab)) && lineSuggestsTimedMainActivity(line)) return false;
+      return true;
+    });
+
+  logisticsNotes = stripPromoted(logisticsNotes);
+  generalNotes = stripPromoted(generalNotes);
+
+  const sourceOrder: string[] = [];
+  for (const tw of content.timeWindowCandidates) {
+    sourceOrder.push(`timeWindow:${tw.label ?? "kamp"}|${tw.earliestStart}-${tw.latestStart}`);
+  }
+  for (const h of highlights) sourceOrder.push(`highlight:${h}`);
+  for (const b of content.bringItems) sourceOrder.push(`bringItem:${b}`);
+  for (const x of logisticsNotes) sourceOrder.push(`logistics:${x}`);
+  for (const x of content.parentTasks) sourceOrder.push(`parentTask:${x}`);
+  for (const x of generalNotes) sourceOrder.push(`general:${x}`);
+  for (const x of content.uncertaintyNotes) sourceOrder.push(`uncertainty:${x}`);
+
+  return {
+    ...content,
+    highlights,
+    logisticsNotes,
+    generalNotes,
+    sourceOrder,
   };
 }
 
