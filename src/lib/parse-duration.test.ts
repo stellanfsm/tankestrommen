@@ -16,6 +16,9 @@ describe("parseDurationMinutes", () => {
     expect(parseDurationMinutes("en halv time med oppvarming")).toBe(30);
     expect(parseDurationMinutes("økta er halvannen time")).toBe(90);
     expect(parseDurationMinutes("tre og en halv time")).toBe(210);
+    expect(parseDurationMinutes("2 x 20 minutter")).toBe(40);
+    expect(parseDurationMinutes("2x20 min + 5 minutter pause")).toBe(45);
+    expect(parseDurationMinutes("2 omganger à 20 minutter")).toBe(40);
   });
 
   it("returnerer null ved utydelig varighet", () => {

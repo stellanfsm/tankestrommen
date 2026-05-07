@@ -35,7 +35,7 @@ import {
   extractStartEndFromScheduleTime,
   resolveNonFlightEventTimes,
 } from "@/lib/event-time-resolve";
-import { isUncertainDurationContext } from "@/lib/parse-duration";
+import { isUncertainDurationContext, parseDurationMinutes } from "@/lib/parse-duration";
 import { currentSpan, flush, startSpan, traced } from "braintrust";
 import { ensureBraintrustLoggerForProject, TANKESTROM_BRAINTRUST_PROJECT } from "@/lib/braintrust-init";
 import {
@@ -1548,6 +1548,231 @@ function extractAttendanceTimeFromDay(day: DayScheduleEntry): string | null {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
+type CupDayTiming = {
+  start: string | null;
+  end: string | null;
+  attendanceTime: string | null;
+  attendanceOffsetMinutes: number | null;
+  durationMinutes: number | null;
+  postEventBufferMinutes: number | null;
+  timeWindow?: { earliestStart: string; latestStart: string };
+  timePrecision: "exact" | "start_only" | "date_only" | "time_window";
+  startTimeSource: "explicit" | "missing_or_unreadable";
+  endTimeSource:
+    | "explicit"
+    | "computed_from_duration"
+    | "computed_from_duration_and_aftertime"
+    | "missing_or_unreadable";
+  requiresManualTimeReview: boolean;
+  timeComputation?: {
+    formula: string;
+    startTime?: string;
+    endTime?: string;
+    durationMinutes: number;
+    computedEndTime?: string;
+    computedStartTime?: string;
+  };
+};
+
+function hhmmToMinutesLocal(hhmm: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 0 || h > 23 || mm < 0 || mm > 59)
+    return null;
+  return h * 60 + mm;
+}
+
+function minutesToHhmmLocal(total: number): string {
+  const t = ((total % 1440) + 1440) % 1440;
+  const h = Math.floor(t / 60);
+  const m = t % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function shiftHhmmLocal(hhmm: string, delta: number): string | null {
+  const m = hhmmToMinutesLocal(hhmm);
+  if (m == null) return null;
+  return minutesToHhmmLocal(m + delta);
+}
+
+function parseCupAttendanceOffsetMinutes(text: string): number | null {
+  const m =
+    /\b(?:oppm[oø]te|m[oø]ter(?:\s+ferdig\s+skiftet)?)\b[^.!?\n]{0,70}?(\d{1,3})\s*min(?:utter)?\s*f[øo]r\b/i.exec(
+      text,
+    ) ||
+    /\b(\d{1,3})\s*min(?:utter)?\s*f[øo]r\b[^.!?\n]{0,70}?\b(?:kamp|oppm[oø]te)\b/i.exec(text);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 && n <= 180 ? n : null;
+}
+
+function parseCupMatchDurationMinutes(text: string): number | null {
+  const normalized = normalizeNorwegianLetters(text).toLowerCase();
+  const mult =
+    /\b(\d{1,2})\s*x\s*(\d{1,2})\s*min(?:utter)?\b/.exec(normalized) ||
+    /\b(\d{1,2})\s*omganger?[^\d]{0,12}(\d{1,2})\s*min(?:utter)?\b/.exec(normalized);
+  if (mult) {
+    const rounds = Number(mult[1]);
+    const per = Number(mult[2]);
+    if (!Number.isFinite(rounds) || !Number.isFinite(per) || rounds <= 0 || per <= 0) return null;
+    let total = rounds * per;
+    const pause = /(?:\+\s*|og\s+)(\d{1,2})\s*min(?:utter)?\s*pause\b/.exec(normalized);
+    if (pause) {
+      const p = Number(pause[1]);
+      if (Number.isFinite(p) && p > 0 && p <= 45) total += p;
+    }
+    return total;
+  }
+  return parseDurationMinutes(text);
+}
+
+function parseCupPostEventBufferMinutes(text: string): number | null {
+  const normalized = normalizeNorwegianLetters(text).toLowerCase();
+  const half = /\b(?:ikke\s+ute\s+for|ikke\s+ferdig\s+for)[^.!?\n]{0,60}?(?:en\s+halvtime|halvtime)\b/.exec(
+    normalized,
+  );
+  if (half) return 30;
+  const m =
+    /\b(?:ikke\s+ute\s+for|ikke\s+ferdig\s+for|etter\s+kampen|etter\s+siste\s+kamp)\b[^.!?\n]{0,80}?(\d{1,3})\s*min(?:utter)?\b/.exec(
+      normalized,
+    );
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 && n <= 180 ? n : null;
+}
+
+function hasVagueAfterLastMatchText(text: string): boolean {
+  const n = normalizeNorwegianLetters(text).toLowerCase();
+  return /\b(etter\s+siste\s+kamp)\b/.test(n) && /\b(rydde|snakke|kort|beskjed|en\s+stund|litt\s+tid)\b/.test(n);
+}
+
+function parseCupTimeWindow(text: string): { earliestStart: string; latestStart: string } | null {
+  const m = /\b(?:en\s+gang\s+)?mellom\s+(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\s+og\s+(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/i.exec(
+    text,
+  );
+  if (!m) return null;
+  const a = `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`;
+  const b = `${String(Number(m[3])).padStart(2, "0")}:${m[4]}`;
+  if (hhmmToMinutesLocal(a) == null || hhmmToMinutesLocal(b) == null) return null;
+  return { earliestStart: a, latestStart: b };
+}
+
+function extractCupMatchTimes(text: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /(?:\b(?:kamp(?:start)?|forste\s+kamp|andre\s+kamp|kamp)\b[^.!?\n]{0,16}?)?(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const hhmm = `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`;
+    if (hhmmToMinutesLocal(hhmm) == null || seen.has(hhmm)) continue;
+    seen.add(hhmm);
+    out.push(hhmm);
+  }
+  return out;
+}
+
+function resolveCupDayTiming(input: {
+  day: DayScheduleEntry;
+  detailsForEvent: string | null;
+  highlightsForEventFinal: string[];
+  notesOnlyForEvent: string[];
+  rememberForEvent: string[];
+  deadlinesForEvent: string[];
+  conditionalDay: boolean;
+}): CupDayTiming {
+  const blob = [
+    input.day.time ?? "",
+    input.detailsForEvent ?? "",
+    ...input.highlightsForEventFinal,
+    ...input.notesOnlyForEvent,
+    ...input.rememberForEvent,
+    ...input.deadlinesForEvent,
+  ].join("\n");
+
+  const timeWindow = parseCupTimeWindow(blob);
+  if (timeWindow) {
+    return {
+      start: null,
+      end: null,
+      attendanceTime: null,
+      attendanceOffsetMinutes: null,
+      durationMinutes: null,
+      postEventBufferMinutes: null,
+      timeWindow,
+      timePrecision: "time_window",
+      startTimeSource: "missing_or_unreadable",
+      endTimeSource: "missing_or_unreadable",
+      requiresManualTimeReview: true,
+    };
+  }
+
+  const r = resolveNonFlightEventTimes({ timeField: input.day.time, contextBlob: blob });
+  const matchTimes = extractCupMatchTimes(blob);
+  const durationMinutes = parseCupMatchDurationMinutes(blob);
+  const attendanceOffsetMinutes = parseCupAttendanceOffsetMinutes(blob);
+  const postEventBufferMinutes = parseCupPostEventBufferMinutes(blob);
+  const vagueAfter = hasVagueAfterLastMatchText(blob);
+  const firstMatch = matchTimes[0] ?? r.start;
+  const lastMatch = matchTimes.length > 0 ? matchTimes[matchTimes.length - 1]! : r.start;
+  const attendanceTime =
+    firstMatch && attendanceOffsetMinutes != null
+      ? shiftHhmmLocal(firstMatch, -attendanceOffsetMinutes)
+      : extractAttendanceTimeFromDay(input.day);
+
+  let start: string | null = attendanceTime ?? firstMatch ?? r.start;
+  let end: string | null = r.end;
+  let endTimeSource: CupDayTiming["endTimeSource"] = r.end ? "explicit" : "missing_or_unreadable";
+  let timeComputation: CupDayTiming["timeComputation"] | undefined;
+
+  if (lastMatch && durationMinutes != null) {
+    const after = postEventBufferMinutes ?? 0;
+    const computed = shiftHhmmLocal(lastMatch, durationMinutes + after);
+    if (computed && (matchTimes.length <= 1 || postEventBufferMinutes != null) && !vagueAfter) {
+      end = computed;
+      endTimeSource = postEventBufferMinutes != null
+        ? "computed_from_duration_and_aftertime"
+        : "computed_from_duration";
+      timeComputation = {
+        formula:
+          postEventBufferMinutes != null
+            ? "start + duration + postEventBuffer = end"
+            : "start + duration = end",
+        startTime: lastMatch,
+        durationMinutes,
+        computedEndTime: computed,
+      };
+    } else if (matchTimes.length > 1 || vagueAfter) {
+      end = null;
+      endTimeSource = "missing_or_unreadable";
+    }
+  }
+
+  if (input.conditionalDay) {
+    start = null;
+    end = null;
+    endTimeSource = "missing_or_unreadable";
+  }
+
+  const timePrecision: CupDayTiming["timePrecision"] =
+    start && end ? "exact" : start ? "start_only" : "date_only";
+
+  return {
+    start,
+    end,
+    attendanceTime,
+    attendanceOffsetMinutes: attendanceOffsetMinutes ?? null,
+    durationMinutes: durationMinutes ?? null,
+    postEventBufferMinutes: postEventBufferMinutes ?? null,
+    timePrecision,
+    startTimeSource: start ? "explicit" : "missing_or_unreadable",
+    endTimeSource,
+    requiresManualTimeReview: !(start && end),
+    ...(timeComputation ? { timeComputation } : {}),
+  };
+}
+
 function composeDayNotes(
   day: DayScheduleEntry,
   fallbackDescription: string | null
@@ -1645,6 +1870,12 @@ type EmbeddedScheduleSegment = {
   endTime?: string | null;
   /** Oppmøtetid når eksplisitt oppgitt (ellers utelates). */
   attendanceTime?: string;
+  attendanceOffsetMinutes?: number;
+  timeWindow?: { earliestStart: string; latestStart: string };
+  timePrecision?: "exact" | "start_only" | "date_only" | "time_window";
+  endTimeSource?: "explicit" | "computed_from_duration" | "computed_from_duration_and_aftertime" | "missing_or_unreadable";
+  durationMinutes?: number | null;
+  postEventBufferMinutes?: number | null;
   title: string;
   location?: string;
   notes?: string;
@@ -1770,6 +2001,7 @@ type PortalEventItem = {
         | "explicit"
         | "explicit_arrival_time"
         | "computed_from_duration"
+        | "computed_from_duration_and_aftertime"
         | "missing_or_unreadable";
       /** Varighet i minutter når utledet eller eksplisitt (ikke-fly / metadata). */
       durationMinutes?: number | null;
@@ -1783,7 +2015,11 @@ type PortalEventItem = {
       };
       displayTimeLabel?: string;
       /** Grov presisjon for tidsfelt i importsvar. */
-      timePrecision?: "exact" | "start_only" | "date_only";
+      timePrecision?: "exact" | "start_only" | "date_only" | "time_window";
+      timeWindow?: { earliestStart: string; latestStart: string };
+      attendanceTime?: string | null;
+      attendanceOffsetMinutes?: number | null;
+      postEventBufferMinutes?: number | null;
       /** Speiler `event.requiresManualTimeReview` for metadata-lesere. */
       requiresManualTimeReview?: boolean;
       /** Konkurranseklasse/lagkode, f.eks. J2013/G12. */
@@ -3072,6 +3308,7 @@ function buildCupEmbeddedScheduleSegment(args: {
   isoDate: string;
   titleSuffix: string | null;
   explicitStartEnd: { start: string; end: string } | null;
+  cupTiming?: CupDayTiming | null;
   detailsForEvent: string | null;
   highlightsForEventFinal: string[];
   rememberForEvent: string[];
@@ -3081,7 +3318,10 @@ function buildCupEmbeddedScheduleSegment(args: {
 }): EmbeddedScheduleSegment {
   let start: string | null = null;
   let end: string | null = null;
-  if (args.explicitStartEnd) {
+  if (args.cupTiming) {
+    start = args.cupTiming.start;
+    end = args.cupTiming.end;
+  } else if (args.explicitStartEnd) {
     start = args.explicitStartEnd.start;
     end = args.explicitStartEnd.end;
   } else {
@@ -3180,7 +3420,21 @@ function buildCupEmbeddedScheduleSegment(args: {
     end,
     startTime: start,
     endTime: end,
-    ...(attendanceTime ? { attendanceTime } : {}),
+    ...(args.cupTiming?.attendanceTime || attendanceTime
+      ? { attendanceTime: args.cupTiming?.attendanceTime ?? attendanceTime ?? undefined }
+      : {}),
+    ...(args.cupTiming?.attendanceOffsetMinutes != null
+      ? { attendanceOffsetMinutes: args.cupTiming.attendanceOffsetMinutes }
+      : {}),
+    ...(args.cupTiming?.timeWindow ? { timeWindow: args.cupTiming.timeWindow } : {}),
+    ...(args.cupTiming?.timePrecision ? { timePrecision: args.cupTiming.timePrecision } : {}),
+    ...(args.cupTiming?.endTimeSource ? { endTimeSource: args.cupTiming.endTimeSource } : {}),
+    ...(args.cupTiming?.durationMinutes != null
+      ? { durationMinutes: args.cupTiming.durationMinutes }
+      : {}),
+    ...(args.cupTiming?.postEventBufferMinutes != null
+      ? { postEventBufferMinutes: args.cupTiming.postEventBufferMinutes }
+      : {}),
     title,
     ...(args.result.location ? { location: args.result.location } : {}),
     ...(notes ? { notes } : {}),
@@ -3907,6 +4161,7 @@ async function buildProposalItems(
     schoolDayOverride?: SchoolDayOverride | null,
     explicitStartEnd?: { start: string; end: string } | null,
     cupProposalDebug?: CupProposalItemDebug | null,
+    cupTiming?: CupDayTiming | null,
     /** Siste kalenderdag (ISO) for flerdagers parent — brukes i stabil arrangementsnøkkel. */
     arrangementEndDateIso?: string | null,
     /** Ekstra fritekst for varighets-/tids-parsing (f.eks. result.description). */
@@ -3930,6 +4185,9 @@ async function buildProposalItems(
     if (tf) {
       start = tf.departureTime;
       end = tf.endTime;
+    } else if (cupTiming) {
+      start = cupTiming.start;
+      end = cupTiming.end;
     } else if (explicitStartEnd) {
       start = explicitStartEnd.start;
       end = explicitStartEnd.end;
@@ -4026,7 +4284,9 @@ async function buildProposalItems(
                 ? true
                 : tf.requiresManualTimeReview,
             }
-          : enforceFlightNoTfFallback || nonFlightResolved?.requiresManualTimeReview
+          : enforceFlightNoTfFallback ||
+              nonFlightResolved?.requiresManualTimeReview ||
+              cupTiming?.requiresManualTimeReview
             ? { requiresManualTimeReview: true }
             : {}),
       },
@@ -4114,6 +4374,27 @@ async function buildProposalItems(
                   ? ("start_only" as const)
                   : ("date_only" as const),
             requiresManualTimeReview: nonFlightResolved.requiresManualTimeReview,
+          }
+        : {}),
+      ...(!tf && cupTiming && !enforceFlightNoTfFallback
+        ? {
+            ...(cupTiming.durationMinutes != null ? { durationMinutes: cupTiming.durationMinutes } : {}),
+            ...(cupTiming.timeComputation ? { timeComputation: cupTiming.timeComputation } : {}),
+            ...(cupTiming.timeWindow ? { timeWindow: cupTiming.timeWindow } : {}),
+            ...(cupTiming.attendanceTime ? { attendanceTime: cupTiming.attendanceTime } : {}),
+            ...(cupTiming.attendanceOffsetMinutes != null
+              ? { attendanceOffsetMinutes: cupTiming.attendanceOffsetMinutes }
+              : {}),
+            ...(cupTiming.postEventBufferMinutes != null
+              ? { postEventBufferMinutes: cupTiming.postEventBufferMinutes }
+              : {}),
+            startTimeSource: cupTiming.startTimeSource,
+            endTimeSource: cupTiming.endTimeSource,
+            timePrecision: cupTiming.timePrecision,
+            ...(cupTiming.requiresManualTimeReview && !cupTiming.end
+              ? { displayTimeLabel: "Sluttid ikke oppgitt" }
+              : {}),
+            requiresManualTimeReview: cupTiming.requiresManualTimeReview,
           }
         : {}),
       ...(!tf && enforceFlightNoTfFallback
@@ -4255,6 +4536,17 @@ async function buildProposalItems(
       ].join(" ");
       const conditionalDay = cupLike && isConditionalTournamentText(dayBlob);
       const titleSuffix = day.dayLabel;
+      const cupTiming = cupLike
+        ? resolveCupDayTiming({
+            day,
+            detailsForEvent: fDetails,
+            highlightsForEventFinal: fHighlightsForEvent,
+            notesOnlyForEvent: fNotesRaw,
+            rememberForEvent: fRemember,
+            deadlinesForEvent: day.deadlines,
+            conditionalDay,
+          })
+        : null;
 
       const explicitStartEnd: { start: string; end: string } | null = null;
       const defaultTimeSuppressed = Boolean(explicitStartEnd);
@@ -4361,6 +4653,7 @@ async function buildProposalItems(
             isoDate,
             titleSuffix,
             explicitStartEnd,
+            cupTiming,
             detailsForEvent,
             highlightsForEventFinal,
             rememberForEvent,
@@ -4455,6 +4748,7 @@ async function buildProposalItems(
           dayOverride,
           explicitStartEnd,
           cupDbg,
+          cupTiming,
           null,
           result.description ?? null,
         );
@@ -4641,6 +4935,7 @@ async function buildProposalItems(
         null,
         parentExplicitStartEnd,
         parentCupDbg,
+        null,
         lastSeg.date,
       );
 

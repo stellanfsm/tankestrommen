@@ -73,6 +73,24 @@ export function parseDurationMinutes(raw: string): number | null {
     return accept(total);
   }
 
+  // "2 x 20 minutter" / "2x20 min" / "2 omganger à 20 minutter" (+ ev. pause)
+  const rounds =
+    /\b(\d{1,2})\s*x\s*(\d{1,2})\s*min(?:utter)?\b/i.exec(text) ||
+    /\b(\d{1,2})\s*omganger?[^\d]{0,14}(\d{1,2})\s*min(?:utter)?\b/i.exec(text);
+  if (rounds) {
+    const n = Number(rounds[1]);
+    const per = Number(rounds[2]);
+    if (Number.isFinite(n) && Number.isFinite(per) && n > 0 && per > 0) {
+      let total = n * per;
+      const pause = /(?:\+\s*|og\s+)(\d{1,2})\s*min(?:utter)?\s*pause\b/i.exec(text);
+      if (pause) {
+        const p = Number(pause[1]);
+        if (Number.isFinite(p) && p > 0 && p <= 45) total += p;
+      }
+      return accept(total);
+    }
+  }
+
   const tmin =
     /\b(\d{1,2})\s*t(?:imer?)?\s+(\d{1,2})\s*(?:min(?:utter?)?|m\b)\b/i.exec(text) ||
     /\b(\d{1,2})\s*(?:timer?|t)\s+(\d{1,2})\s*min(?:utter?)?\b/i.exec(text);
