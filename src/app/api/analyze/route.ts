@@ -1673,6 +1673,223 @@ function extractCupMatchTimes(text: string): string[] {
   return out;
 }
 
+const SHORT_VALID_BRING_ITEMS = new Set([
+  "håndkle",
+  "handkle",
+  "sokker",
+  "innesko",
+  "shorts",
+]);
+
+function isBringItemsSignal(text: string): boolean {
+  return /\b(husk|ta\s+med|utstyr|pakkeliste|alle\s+ma\s+ha\s+med|barna\s+ma\s+ha\s+med)\b/i.test(
+    normalizeNorwegianLetters(text),
+  );
+}
+
+function splitBringItems(text: string): string[] {
+  const cleaned = normalizeSpace(
+    text
+      .replace(/^(husk(?:\s*\/\s*ta\s+med)?|ta\s+med|utstyr|pakkeliste)\s*:?\s*/i, "")
+      .replace(/^(alle|barna)\s+ma\s+ha\s+med\s*/i, ""),
+  );
+  if (!cleaned) return [];
+  return cleaned
+    .split(/\s*(?:,|;|\bog\b)\s*/i)
+    .map((s) => normalizeSpace(s.replace(/^[\-•]\s*/, "").replace(/[.!?]+$/g, "")))
+    .filter((s) => s.length >= 2);
+}
+
+function isNoiseFragment(text: string): boolean {
+  const t = normalizeSpace(text);
+  if (!t) return true;
+  const n = normalizeNorwegianLetters(t).toLowerCase();
+  if (
+    n === "og" ||
+    n === "dagens innhold" ||
+    n === "husk / ta med" ||
+    n === "husk" ||
+    n === "ta med" ||
+    n === "notater" ||
+    n === "hoydepunkter"
+  ) {
+    return true;
+  }
+  if (/^i\s+[a-zæøå][\w\s.-]{0,36}$/i.test(t)) return true;
+  if (t.length <= 2 && !SHORT_VALID_BRING_ITEMS.has(n)) return true;
+  return false;
+}
+
+function stripLocationOnlyFragment(text: string): string {
+  return normalizeSpace(text.replace(/\bi\s+[A-ZÆØÅa-zæøå][^;,.]{2,40}$/i, ""));
+}
+
+function cleanupCupHighlight(
+  raw: string,
+  titleBlocklist: Set<string>,
+): { time: string; label: string; location?: string } | null {
+  const input = normalizeSpace(raw);
+  if (!input || isNoiseFragment(input)) return null;
+  if (titleBlocklist.has(cupLineNormKey(input))) return null;
+  if (parseCupTimeWindow(input)) return null;
+  const tm = /(\d{1,2})[.:](\d{2})/.exec(input);
+  if (!tm) return null;
+  const time = `${String(Number(tm[1])).padStart(2, "0")}:${tm[2]}`;
+  let label = normalizeSpace(input.replace(tm[0], "").replace(/^[\s:–\-]+|[\s:–\-]+$/g, ""));
+  let location: string | undefined;
+  const semicolonParts = input.split(";").map((p) => normalizeSpace(p)).filter(Boolean);
+  if (semicolonParts.length >= 2) {
+    const right = semicolonParts[semicolonParts.length - 1]!;
+    if (!/^\d{1,2}[.:]\d{2}$/.test(right)) label = right;
+  }
+  const loc = /\bi\s+([A-ZÆØÅa-zæøå][^;,.]{2,40})$/i.exec(input);
+  if (loc) location = normalizeSpace(loc[1]);
+  label = stripLocationOnlyFragment(label);
+  if (!label) {
+    if (/\boppm[oø]te\b/i.test(input)) label = "Oppmøte";
+    else if (/\bkamp\b/i.test(input)) label = "Kamp";
+    else if (/\bavreise\b/i.test(input)) label = "Avreise";
+  }
+  if (!label || isNoiseFragment(label)) return null;
+  if (titleBlocklist.has(cupLineNormKey(label))) return null;
+  return { time, label, ...(location ? { location } : {}) };
+}
+
+function buildCupStructuredDayContent(input: {
+  date: string;
+  details: string | null;
+  highlights: string[];
+  notes: string[];
+  rememberItems: string[];
+  deadlines: string[];
+  parentTitle: string;
+  childTitle: string;
+}): {
+  highlights: string[];
+  bringItems: string[];
+  logisticsNotes: string[];
+  generalNotes: string[];
+  uncertaintyNotes: string[];
+  sourceOrder: string[];
+  removedDuplicateHighlights: string[];
+  removedFragmentNotes: string[];
+  timeWindowCandidates: Array<{ earliestStart: string; latestStart: string; label?: string }>;
+} {
+  const titleBlocklist = new Set<string>([
+    cupLineNormKey(input.parentTitle),
+    cupLineNormKey(input.childTitle),
+  ]);
+  const bringItems: string[] = [];
+  const logisticsNotes: string[] = [];
+  const generalNotes: string[] = [];
+  const uncertaintyNotes: string[] = [];
+  const sourceOrder: string[] = [];
+  const removedFragmentNotes: string[] = [];
+  const timeWindowCandidates: Array<{ earliestStart: string; latestStart: string; label?: string }> = [];
+  const highlightsRaw: string[] = [];
+
+  const pushOrdered = (kind: "highlight" | "bringItem" | "logistics" | "general" | "uncertainty", v: string) => {
+    sourceOrder.push(`${kind}:${v}`);
+  };
+  const addNote = (raw: string) => {
+    const s = normalizeSpace(raw);
+    if (!s || isNoiseFragment(s)) {
+      if (s) removedFragmentNotes.push(s);
+      return;
+    }
+    if (/\b(avhenger|betinget|usikkert|tidspunkt\s+ikke\s+klart|kommer\s+senere)\b/i.test(s)) {
+      uncertaintyNotes.push(s);
+      pushOrdered("uncertainty", s);
+      return;
+    }
+    if (/\b(hall|arena|skolehall|mellom\s+kampene|oppvarming|rydd|samlet)\b/i.test(s)) {
+      logisticsNotes.push(s);
+      pushOrdered("logistics", s);
+      return;
+    }
+    generalNotes.push(s);
+    pushOrdered("general", s);
+  };
+
+  const collectBringItems = (raw: string) => {
+    if (!isBringItemsSignal(raw)) return;
+    for (const item of splitBringItems(raw)) {
+      if (isNoiseFragment(item)) continue;
+      bringItems.push(item);
+      pushOrdered("bringItem", item);
+    }
+  };
+
+  for (const r of input.rememberItems) collectBringItems(r);
+  for (const n of input.notes) collectBringItems(n);
+  if (input.details) collectBringItems(input.details);
+
+  const gather = [input.details ?? "", ...input.highlights, ...input.notes, ...input.deadlines];
+  for (const raw of gather) {
+    const s = normalizeSpace(raw);
+    if (!s) continue;
+    const timeWindow = parseCupTimeWindow(s);
+    if (timeWindow) {
+      const labelPart = normalizeSpace(s.split(/mellom/i)[0] || "Tidspunkt");
+      timeWindowCandidates.push({ ...timeWindow, ...(labelPart ? { label: labelPart } : {}) });
+      uncertaintyNotes.push(
+        `${labelPart || "Tidspunkt"} mellom ${timeWindow.earliestStart} og ${timeWindow.latestStart}`,
+      );
+      pushOrdered(
+        "uncertainty",
+        `${labelPart || "Tidspunkt"} mellom ${timeWindow.earliestStart} og ${timeWindow.latestStart}`,
+      );
+      continue;
+    }
+    const parsed = cleanupCupHighlight(s, titleBlocklist);
+    if (parsed) {
+      highlightsRaw.push(
+        `${parsed.time} ${parsed.label}${parsed.location ? ` (${parsed.location})` : ""}`.trim(),
+      );
+      continue;
+    }
+    addNote(s);
+  }
+
+  const dedupHighlights = new Map<string, string>();
+  const removedDuplicateHighlights: string[] = [];
+  for (const h of highlightsRaw) {
+    const m = /^(\d{2}:\d{2})\s+(.+)$/.exec(h);
+    if (!m) continue;
+    const k = `${input.date}|${m[1]}|${cupLineNormKey(m[2] || "")}`;
+    if (dedupHighlights.has(k)) {
+      removedDuplicateHighlights.push(h);
+      continue;
+    }
+    dedupHighlights.set(k, h);
+    pushOrdered("highlight", h);
+  }
+
+  const dedupeStable = (arr: string[]) => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const x of arr) {
+      const key = cupLineNormKey(x);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(x);
+    }
+    return out;
+  };
+
+  return {
+    highlights: [...dedupHighlights.values()],
+    bringItems: dedupeStable(bringItems),
+    logisticsNotes: dedupeStable(logisticsNotes),
+    generalNotes: dedupeStable(generalNotes),
+    uncertaintyNotes: dedupeStable(uncertaintyNotes),
+    sourceOrder,
+    removedDuplicateHighlights,
+    removedFragmentNotes: dedupeStable(removedFragmentNotes),
+    timeWindowCandidates,
+  };
+}
+
 function resolveCupDayTiming(input: {
   day: DayScheduleEntry;
   detailsForEvent: string | null;
@@ -1893,6 +2110,15 @@ type EmbeddedScheduleSegment = {
     | "none";
   embeddedScheduleSegmentNotesTrimmed?: boolean;
   embeddedScheduleSegmentNotesOmitted?: string[];
+  dayContent?: {
+    highlights: string[];
+    bringItems: string[];
+    logisticsNotes: string[];
+    generalNotes: string[];
+    uncertaintyNotes: string[];
+    sourceOrder?: string[];
+    timeWindowCandidates?: Array<{ earliestStart: string; latestStart: string; label?: string }>;
+  };
 };
 
 /** Diagnostikk for arrangementskobling (oppfølgingsmeldinger / stabil kjerne). */
@@ -2026,6 +2252,15 @@ type PortalEventItem = {
       competitionClass?: string | null;
       /** Målgruppe som AI har lest ut (lagres i metadata fremfor child-title). */
       targetGroup?: string | null;
+      dayContent?: {
+        highlights: string[];
+        bringItems: string[];
+        logisticsNotes: string[];
+        generalNotes: string[];
+        uncertaintyNotes: string[];
+        sourceOrder?: string[];
+        timeWindowCandidates?: Array<{ earliestStart: string; latestStart: string; label?: string }>;
+      };
       documentExtractedPersonName?: string;
       passengerName?: string;
       travel?: {
@@ -2091,6 +2326,18 @@ type CupProposalItemDebug = {
   childDates?: string[];
   childEndTimeSources?: Array<string | null>;
   childTimePrecisions?: Array<string | null>;
+  rawNotesBeforeCleanup?: string[];
+  finalNotes?: string[];
+  rawHighlightsBeforeCleanup?: string[];
+  finalHighlights?: string[];
+  bringItems?: string[];
+  logisticsNotes?: string[];
+  generalNotes?: string[];
+  uncertaintyNotes?: string[];
+  removedFragmentNotes?: string[];
+  removedDuplicateHighlights?: string[];
+  timeWindowCandidates?: Array<{ earliestStart: string; latestStart: string }>;
+  sourceOrder?: string[];
   /** Parent nøkkel-felt for enklere klientdiagnose. */
   arrangementStableKey?: string;
   arrangementBlockGroupId?: string;
@@ -3315,6 +3562,15 @@ function buildCupEmbeddedScheduleSegment(args: {
   notesOnlyForEvent: string[];
   deadlinesForEvent: string[];
   conditionalDay: boolean;
+  structuredDayContent?: {
+    highlights: string[];
+    bringItems: string[];
+    logisticsNotes: string[];
+    generalNotes: string[];
+    uncertaintyNotes: string[];
+    sourceOrder: string[];
+    timeWindowCandidates: Array<{ earliestStart: string; latestStart: string; label?: string }>;
+  } | null;
 }): EmbeddedScheduleSegment {
   let start: string | null = null;
   let end: string | null = null;
@@ -3443,6 +3699,23 @@ function buildCupEmbeddedScheduleSegment(args: {
     embeddedScheduleSegmentNotesSource: source,
     ...(trimmed ? { embeddedScheduleSegmentNotesTrimmed: true } : {}),
     ...(omitted.length > 0 ? { embeddedScheduleSegmentNotesOmitted: omitted } : {}),
+    ...(args.structuredDayContent
+      ? {
+          dayContent: {
+            highlights: args.structuredDayContent.highlights,
+            bringItems: args.structuredDayContent.bringItems,
+            logisticsNotes: args.structuredDayContent.logisticsNotes,
+            generalNotes: args.structuredDayContent.generalNotes,
+            uncertaintyNotes: args.structuredDayContent.uncertaintyNotes,
+            ...(args.structuredDayContent.sourceOrder.length > 0
+              ? { sourceOrder: args.structuredDayContent.sourceOrder }
+              : {}),
+            ...(args.structuredDayContent.timeWindowCandidates.length > 0
+              ? { timeWindowCandidates: args.structuredDayContent.timeWindowCandidates }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -4606,6 +4879,25 @@ async function buildProposalItems(
       let deadlinesForEvent = day.deadlines;
       let highlightsForEventFinal = fHighlightsForEvent;
       let detailsForEvent = fDetails;
+      let structuredDayContent:
+        | {
+            highlights: string[];
+            bringItems: string[];
+            logisticsNotes: string[];
+            generalNotes: string[];
+            uncertaintyNotes: string[];
+            sourceOrder: string[];
+            removedDuplicateHighlights: string[];
+            removedFragmentNotes: string[];
+            timeWindowCandidates: Array<{
+              earliestStart: string;
+              latestStart: string;
+              label?: string;
+            }>;
+          }
+        | null = null;
+      const rawNotesBeforeCleanup = [...fNotesRaw];
+      const rawHighlightsBeforeCleanup = [...fHighlightsForEvent];
       let totalStripped = 0;
       const promotedFromSource = {
         rememberItems: 0,
@@ -4645,6 +4937,51 @@ async function buildProposalItems(
         totalStripped += rdet.removed;
       }
 
+      if (cupLike) {
+        const parentTitle = buildCupParentCalendarTitle(result);
+        const childTitle = buildCupChildCalendarTitle(result, titleSuffix);
+        structuredDayContent = buildCupStructuredDayContent({
+          date: isoDate,
+          details: detailsForEvent,
+          highlights: highlightsForEventFinal,
+          notes: notesOnlyForEvent,
+          rememberItems: rememberForEvent,
+          deadlines: deadlinesForEvent,
+          parentTitle,
+          childTitle,
+        });
+        highlightsForEventFinal = structuredDayContent.highlights;
+        rememberForEvent = structuredDayContent.bringItems;
+        notesOnlyForEvent = [
+          ...structuredDayContent.logisticsNotes,
+          ...structuredDayContent.generalNotes,
+          ...structuredDayContent.uncertaintyNotes,
+        ];
+      }
+
+      const removedFragmentNotes = rawNotesBeforeCleanup.filter((n) => {
+        const s = normalizeSpace(n);
+        if (structuredDayContent?.removedFragmentNotes?.length) {
+          return structuredDayContent.removedFragmentNotes.some((x) => cupLineNormKey(x) === cupLineNormKey(s));
+        }
+        return (
+          s.length > 0 &&
+          s.length <= 12 &&
+          !notesOnlyForEvent.some((k) => cupLineNormKey(k) === cupLineNormKey(s))
+        );
+      });
+      const removedDuplicateHighlights = rawHighlightsBeforeCleanup.filter((h, idx, arr) => {
+        if (structuredDayContent?.removedDuplicateHighlights?.length) {
+          return structuredDayContent.removedDuplicateHighlights.some(
+            (x) => cupLineNormKey(x) === cupLineNormKey(h),
+          );
+        }
+        const key = cupLineNormKey(h);
+        const first = arr.findIndex((x) => cupLineNormKey(x) === key);
+        const stillInFinal = highlightsForEventFinal.some((f) => cupLineNormKey(f) === key);
+        return idx > first || !stillInFinal;
+      });
+
       if (cupEmbeddedScheduleSegments) {
         cupEmbeddedScheduleSegments.push(
           buildCupEmbeddedScheduleSegment({
@@ -4660,6 +4997,7 @@ async function buildProposalItems(
             notesOnlyForEvent,
             deadlinesForEvent,
             conditionalDay,
+            structuredDayContent,
           }),
         );
       }
@@ -4730,6 +5068,30 @@ async function buildProposalItems(
               cupParentTaskRemovedFromEventNotes: totalStripped > 0 ? totalStripped : undefined,
               cupDuplicateParentTaskSuppressed:
                 duplicateParentSuppressed > 0 ? duplicateParentSuppressed : undefined,
+              rawNotesBeforeCleanup,
+              finalNotes: notesOnlyForEvent,
+              rawHighlightsBeforeCleanup,
+              finalHighlights: highlightsForEventFinal,
+              bringItems: rememberForEvent,
+              logisticsNotes: structuredDayContent?.logisticsNotes,
+              generalNotes: structuredDayContent?.generalNotes,
+              uncertaintyNotes: structuredDayContent?.uncertaintyNotes,
+              removedFragmentNotes: removedFragmentNotes.length > 0 ? removedFragmentNotes : undefined,
+              removedDuplicateHighlights:
+                removedDuplicateHighlights.length > 0 ? removedDuplicateHighlights : undefined,
+              timeWindowCandidates:
+                structuredDayContent?.timeWindowCandidates?.length
+                  ? structuredDayContent.timeWindowCandidates.map((tw) => ({
+                      earliestStart: tw.earliestStart,
+                      latestStart: tw.latestStart,
+                    }))
+                  : cupTiming?.timeWindow
+                    ? [cupTiming.timeWindow]
+                    : undefined,
+              sourceOrder:
+                structuredDayContent?.sourceOrder && structuredDayContent.sourceOrder.length > 0
+                  ? structuredDayContent.sourceOrder
+                  : ["details", "highlights", "notes", "remember", "deadlines"],
             }
           : null;
 
@@ -4766,6 +5128,21 @@ async function buildProposalItems(
           const n = ev.event.notes;
           ev.event.metadata.cupProposalDebug.cupEventNotesAfterTaskStripping =
             n.length > 520 ? `${n.slice(0, 520)}…` : n;
+        }
+        if (cupLike && structuredDayContent && ev.event.metadata) {
+          ev.event.metadata.dayContent = {
+            highlights: structuredDayContent.highlights,
+            bringItems: structuredDayContent.bringItems,
+            logisticsNotes: structuredDayContent.logisticsNotes,
+            generalNotes: structuredDayContent.generalNotes,
+            uncertaintyNotes: structuredDayContent.uncertaintyNotes,
+            ...(structuredDayContent.sourceOrder.length > 0
+              ? { sourceOrder: structuredDayContent.sourceOrder }
+              : {}),
+            ...(structuredDayContent.timeWindowCandidates.length > 0
+              ? { timeWindowCandidates: structuredDayContent.timeWindowCandidates }
+              : {}),
+          };
         }
         if (cupMergeBuffer) cupMergeBuffer.push(ev);
         else items.push(ev);
