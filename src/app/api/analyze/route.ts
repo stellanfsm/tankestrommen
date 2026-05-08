@@ -54,6 +54,10 @@ import {
   formatCupEventNotesFlat,
   parseCupTimeWindow,
 } from "@/lib/cup-day-content";
+import {
+  extractGlobalCupScheduleTimesForDay,
+  isConditionalTournamentTextForDay,
+} from "@/lib/cup-timing-context";
 
 function asNullableString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -3157,26 +3161,8 @@ function isGeneralCupPracticalBulkLine(line: string): boolean {
   return false;
 }
 
-function isConditionalTournamentText(blob: string): boolean {
-  const n = normalizeNorwegianLetters(normalizeSpace(blob));
-  if (/\bhvis\s+vi\s+(går|gar)\s+videre\b/.test(n)) return true;
-  if (/\b(hvis|dersom)\s+(vi|laget|gruppa|dere)\s+(går|gar|kommer)\b/.test(n)) return true;
-  if (/\b(avhengig|evt\.?|eventuell|eventuelle)\b/.test(n) && /\b(sluttspill|cup|finale|spill|kamp)\b/.test(n))
-    return true;
-  if (/\beventuell\w*\b/.test(n) && /\b(sluttspill|kamp|finale|cup|A-)\b/.test(n)) return true;
-  if (/\bA-?sluttspill\b/.test(n)) return true;
-  if (/\btidspunkt\s+kommer\b/.test(n)) return true;
-  if (/\b(kommer|publiseres)\s+senere\b/.test(n)) return true;
-  if (/\bikke\s+fastsatt\b/.test(n)) return true;
-  if (/\bTBA\b/.test(blob)) return true;
-  if (/\b(søndag|sondag)\b/.test(n) && /\b(sluttspill|finale|cupkamp|semifinale)\b/.test(n)) {
-    if (/\b(hvis|dersom|eventuell|avhengig|kanskje|evt)\b/.test(n)) return true;
-  }
-  const rawSpaced = normalizeSpace(blob);
-  if (/\b(søndag|sondag)\b/i.test(rawSpaced) && /\b(sluttspill|finale|semifinale)\b/.test(n)) {
-    if (!/\d{1,2}[.:]\d{2}/.test(rawSpaced)) return true;
-  }
-  return false;
+function isConditionalTournamentText(blob: string, dayLabel?: string | null): boolean {
+  return isConditionalTournamentTextForDay(blob, dayLabel);
 }
 
 /** Linje som sannsynligvis hører til én kampdag (skal ikke flyttes til «felles for helgen»). */
@@ -4587,6 +4573,7 @@ async function buildProposalItems(
     const splitTasks = (raw: string | null) => splitTaskCandidatesForCup(raw);
     const cupEmbeddedScheduleSegments: EmbeddedScheduleSegment[] | null =
       cupLike && result.scheduleByDay.length >= 2 ? [] : null;
+    const cupGlobalScheduleBlob = cupLike ? [result.title ?? "", result.description ?? ""].join("\n") : "";
 
     for (const day of result.scheduleByDay) {
       const isoDate = resolveDate(day.date, day.dayLabel);
@@ -4598,7 +4585,7 @@ async function buildProposalItems(
       const fHighlights = cupLike ? filterHoistedCupStrings(day.highlights, hk) : day.highlights;
       const fDetails = cupLike ? filterDetailsHoisted(day.details, hk) : day.details;
 
-      const fHighlightsForEvent =
+      const fHighlightsForEventBase =
         cupLike
           ? fHighlights.filter((h) => {
               const s = normalizeSpace(h);
@@ -4608,6 +4595,13 @@ async function buildProposalItems(
               return true;
             })
           : fHighlights;
+      const globalDayMatchTimes = cupLike
+        ? extractGlobalCupScheduleTimesForDay(cupGlobalScheduleBlob, day.dayLabel)
+        : [];
+      const fHighlightsForEvent =
+        globalDayMatchTimes.length > 0
+          ? [...fHighlightsForEventBase, ...globalDayMatchTimes.map((t) => `${t} Kamp`)]
+          : fHighlightsForEventBase;
 
       const dayBlob = [
         fDetails,
@@ -4616,7 +4610,8 @@ async function buildProposalItems(
         ...fRemember,
         day.dayLabel ?? "",
       ].join(" ");
-      const conditionalDay = cupLike && isConditionalTournamentText(dayBlob);
+      const conditionalDay =
+        cupLike && isConditionalTournamentTextForDay(dayBlob, day.dayLabel);
       const titleSuffix = day.dayLabel;
       let cupTiming: CupDayTiming | null = null;
 

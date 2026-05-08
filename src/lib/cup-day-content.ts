@@ -219,6 +219,8 @@ function cleanupCupHighlight(
   let location: string | undefined;
   if (loc) location = normalizeSpace(loc[1]);
   label = stripLocationOnlyFragment(label);
+  const semantic = inferTimedActivityLabelFromText(input);
+  if (semantic === "Oppmøte") label = "Oppmøte";
   if (isCupParentPracticalLine(label)) return null;
   if (!label || label.length < 2 || isNoiseFragment(label) || highlightLabelIsTimeWindowJunk(label)) {
     const inferred =
@@ -682,6 +684,12 @@ export function enrichCupStructuredContentWithResolvedTiming(
   }
 
   const att = enrichment.attendanceTime;
+  if (att && /\boppm[oø]te\b/i.test(blob)) {
+    highlights = highlights.map((h) => {
+      if (!h.startsWith(`${att} `)) return h;
+      return `${att} Oppmøte`;
+    });
+  }
   if (att && !highlightCoversTime(highlights, att)) {
     const firstMatch = enrichment.orderedMatchTimes[0];
     if (!firstMatch || att !== firstMatch || /\boppm[oø]te\b/i.test(blob)) {
