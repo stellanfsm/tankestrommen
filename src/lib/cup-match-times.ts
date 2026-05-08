@@ -38,9 +38,36 @@ function lineLooksLikeAdministrativeDeadline(line: string): boolean {
 }
 
 /**
+ * Alle HH:MM på linjer med kamp-/aktivitetsspråk (uten oppmøte-filtrering — brukes til å
+ * unngå at «18:40 … oppmøte» tolkes som oppmøtetid når kampstart 18:40 finnes i teksten).
+ */
+export function kampAnchoredHhmmInText(text: string): Set<string> {
+  const seen = new Set<string>();
+  for (const lineRaw of text.split(/\n+/)) {
+    const line = normalizeSpace(lineRaw);
+    if (!line) continue;
+    const n = normalizeNorwegianLetters(line);
+    if (
+      !/\b(kamp(?:start)?|forste\s+kamp|første\s+kamp|andre\s+kamp|spill(?:er|ere)?|avkast|starter)\b/.test(
+        n,
+      )
+    )
+      continue;
+    const re = /(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      const hhmm = `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`;
+      if (hhmmToMinutesLocal(hhmm) != null) seen.add(hhmm);
+    }
+  }
+  return seen;
+}
+
+/**
  * Alle klokkeslett som tydelig er oppmøte (ikke kampstart), for filtrering fra kamptidslisten.
  */
 export function extractExplicitAttendanceHhmmTimes(text: string): Set<string> {
+  const kampTimes = kampAnchoredHhmmInText(text);
   const s = new Set<string>();
   const add = (h: string, mm: string) => {
     const hh = String(Number(h)).padStart(2, "0");
@@ -52,7 +79,12 @@ export function extractExplicitAttendanceHhmmTimes(text: string): Set<string> {
     /\b(?:oppm[oø]te|m[oø]t(?:er)?)\b[^.!?\n]{0,90}?\bkl\.?\s*(\d{1,2})[.:](\d{2})\b/gi;
   while ((m = re1.exec(text)) !== null) add(m[1]!, m[2]!);
   const re2 = /\b(\d{1,2})[.:](\d{2})\b[^.!?\n]{0,40}?\boppm[oø]te\b/gi;
-  while ((m = re2.exec(text)) !== null) add(m[1]!, m[2]!);
+  while ((m = re2.exec(text)) !== null) {
+    const hh = String(Number(m[1])).padStart(2, "0");
+    const mm = m[2]!;
+    if (kampTimes.has(`${hh}:${mm}`)) continue;
+    add(m[1]!, m[2]!);
+  }
   const re3 = /\boppm[oø]te(?:\s*kl\.?)?\s*(\d{1,2})[.:](\d{2})\b/gi;
   while ((m = re3.exec(text)) !== null) add(m[1]!, m[2]!);
   return s;
@@ -74,7 +106,7 @@ export function extractCupMatchTimes(text: string): string[] {
   const seen = new Set<string>();
   const lines = text.split(/\n+/);
   const re =
-    /(?:\b(?:kamp(?:start)?|forste\s+kamp|første\s+kamp|andre\s+kamp)\b[^.!?\n]{0,24}?)?(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/gi;
+    /(?:\b(?:kamp(?:start)?|forste\s+kamp|første\s+kamp|andre\s+kamp|spill(?:er|ere)?|avkast|starter)\b[^.!?\n]{0,24}?)?(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/gi;
   for (const lineRaw of lines) {
     const line = normalizeSpace(lineRaw);
     if (!line || lineLooksLikeAdministrativeDeadline(line)) continue;
@@ -88,5 +120,38 @@ export function extractCupMatchTimes(text: string): string[] {
       out.push(hhmm);
     }
   }
+  return out;
+}
+
+/**
+ * Klokkeslett på linjer med tydelig kamp-/aktivitetsspråk (når hoved-regex ikke traff,
+ * f.eks. «Kampstart kl. 18:40» i et notat som senere ble flyttet ut av dag-blobben).
+ */
+export function extractKampAnchoredClockTimes(text: string): string[] {
+  const explicitSkip = extractExplicitAttendanceHhmmTimes(text);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const lines = text.split(/\n+/);
+  for (const lineRaw of lines) {
+    const line = normalizeSpace(lineRaw);
+    if (!line || lineLooksLikeAdministrativeDeadline(line)) continue;
+    const n = normalizeNorwegianLetters(line);
+    if (
+      !/\b(kamp(?:start)?|forste\s+kamp|første\s+kamp|andre\s+kamp|spill(?:er|ere)?|avkast|starter)\b/.test(
+        n,
+      )
+    )
+      continue;
+    const re = /(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      if (contextSuggestsAttendanceForTime(line, m.index, m[0].length)) continue;
+      const hhmm = `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`;
+      if (hhmmToMinutesLocal(hhmm) == null || seen.has(hhmm) || explicitSkip.has(hhmm)) continue;
+      seen.add(hhmm);
+      out.push(hhmm);
+    }
+  }
+  out.sort((a, b) => (hhmmToMinutesLocal(a)! - hhmmToMinutesLocal(b)!));
   return out;
 }

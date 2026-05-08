@@ -68,6 +68,8 @@ export function inferTimedActivityLabelFromText(text: string): string | null {
   if (/\btredje\s+kamp\b/.test(n)) return "Tredje kamp";
   if (/\bkampstart\b/.test(n)) return "Kampstart";
   if (/\bkamp\b/.test(n)) return "Kamp";
+  if (/\b(spill(?:er|ere)?|avkast)\b/.test(n)) return "Kamp";
+  if (/\bstarter\b/.test(n) && !/\boppm[oø]te\b/.test(n)) return "Kamp";
   if (/\boppm[oø]te\b/.test(n)) return "Oppmøte";
   if (/\bsamling\b/.test(n)) return "Samling";
   if (/\bavreise\b/.test(n)) return "Avreise";

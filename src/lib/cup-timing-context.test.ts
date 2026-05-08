@@ -21,6 +21,16 @@ describe("cup timing context regression (Vårcupen)", () => {
     expect(extractGlobalCupScheduleTimesForDay(text, "lørdag")).toEqual(["09:20", "15:10"]);
   });
 
+  it("tar ikke med oppmøte-klokkeslett som kamp når dag og kl står i oppmøte-setningen", () => {
+    const text = [
+      "Foreløpig kampoppsett er at vi spiller fredag kl. 18:40, lørdag kl. 09:20 og lørdag kl. 15:10.",
+      "Oppmøte fredag er kl. 17:45 ved banen, 55 minutter før kampstart.",
+    ].join("\n");
+    const byDay = extractGlobalCupScheduleTimesByDay(text);
+    expect(byDay.fredag).toEqual(["18:40"]);
+    expect(byDay.lordag).toEqual(["09:20", "15:10"]);
+  });
+
   it("søndagsbetingelse smitter ikke til lørdag", () => {
     const saturdayBlob =
       "Lørdag kl. 09:20 og 15:10. Oppmøte 45 minutter før hver kamp. Dersom vi går videre til A-sluttspill blir det kamp søndag.";

@@ -31,6 +31,30 @@ function dedupeTimes(times: string[]): string[] {
   return out;
 }
 
+function clockInMatchLooksLikeAttendanceOnlyLine(text: string, m: RegExpExecArray): boolean {
+  const lineStart = text.lastIndexOf("\n", m.index) + 1;
+  const lineEndIdx = text.indexOf("\n", m.index);
+  const lineEnd = lineEndIdx === -1 ? text.length : lineEndIdx;
+  const line = text.slice(lineStart, lineEnd);
+  const clockTail = m[0].match(/(\d{1,2})[.:](\d{2})\b/);
+  if (!clockTail) return false;
+  const rel = m.index - lineStart + m[0].lastIndexOf(clockTail[0]);
+  if (rel < 0 || rel > line.length) return false;
+  const dayWord = (m[1] ?? "").trim();
+  if (!dayWord) return false;
+  const dayIdx = line.toLowerCase().indexOf(dayWord.toLowerCase());
+  if (dayIdx < 0) return false;
+  const afterDayToClock = line.slice(dayIdx + dayWord.length, rel);
+  const oppmoteTouchesDay = new RegExp(`\\boppm[oø]te\\s+${dayWord}\\b`, "i").test(line.slice(0, rel));
+  const oppmoteBetweenDayAndClock = /\boppm[oø]te\b/i.test(afterDayToClock);
+  if (!oppmoteTouchesDay && !oppmoteBetweenDayAndClock) return false;
+  if (/\b(kamp|kampstart|første\s+kamp|spiller|spilles|avkast)\b/i.test(afterDayToClock)) return false;
+  const clockLen = clockTail[0].length;
+  const afterClock = line.slice(rel + clockLen).trimStart();
+  if (/^(første\s+kamp|andre\s+kamp|tredje\s+kamp|kampstart|\bkamp\b)/i.test(afterClock)) return false;
+  return true;
+}
+
 export function extractGlobalCupScheduleTimesByDay(text: string): Record<CupWeekdayKey, string[]> {
   const out: Record<CupWeekdayKey, string[]> = { fredag: [], lordag: [], sondag: [] };
   const re =
@@ -42,6 +66,7 @@ export function extractGlobalCupScheduleTimesByDay(text: string): Record<CupWeek
     const hh = Number(m[2]);
     const mm = Number(m[3]);
     if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) continue;
+    if (clockInMatchLooksLikeAttendanceOnlyLine(text, m)) continue;
     out[day].push(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
   }
   out.fredag = dedupeTimes(out.fredag);

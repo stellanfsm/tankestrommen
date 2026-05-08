@@ -16,4 +16,9 @@ describe("cup-match-times (portal timing)", () => {
     const blob = "Oppmøte fredag er kl. 17:45 ved Ekeberg, altså 55 minutter før kampstart.\nKamp kl. 18:40";
     expect(extractCupMatchTimes(blob)).toEqual(["18:40"]);
   });
+
+  it("plukker kamptid når linjen bruker spiller/avkast/starter uten ordet kamp", () => {
+    expect(extractCupMatchTimes("Avkast kl. 18:40 på banen 1.")).toEqual(["18:40"]);
+    expect(extractCupMatchTimes("Lagene starter 18:40.")).toEqual(["18:40"]);
+  });
 });

@@ -233,6 +233,38 @@ describe("buildCupStructuredDayContent (Høstcupen-regresjon)", () => {
     expect(new Set(enriched.highlights).size).toBe(enriched.highlights.length);
   });
 
+  it("én kamptid: mye oppmøte-tekst i blob skal ikke gi kamp-raden «18:40 Oppmøte»", () => {
+    const structured = buildCupStructuredDayContent({
+      ...base,
+      details: null,
+      highlights: [],
+      notes: [],
+      rememberItems: [],
+      deadlines: [],
+    });
+    const blob = [
+      "Husk oppmøte i god tid.",
+      "Vi trenger hjelp til oppmøte og organisering.",
+      "Kampstart er kl. 18:40.",
+    ].join("\n");
+    const enriched = enrichCupStructuredContentWithResolvedTiming(structured, {
+      date: "2026-06-12",
+      parentTitleNorm: "varcupen",
+      childTitleNorm: "varcupen fredag",
+      sourceBlob: blob,
+      attendanceTime: "17:45",
+      orderedMatchTimes: ["18:40"],
+      daySegmentStart: "17:45",
+      daySegmentEnd: null,
+      timeWindow: null,
+      timePrecision: "start_only",
+      tentative: false,
+    });
+    expect(enriched.highlights.some((h) => /^18:40\s+Oppmøte\b/i.test(h))).toBe(false);
+    expect(enriched.highlights).toContain("18:40 Første kamp");
+    expect(enriched.highlights).toContain("17:45 Oppmøte");
+  });
+
   it("eksplisitt oppmøte-klokkeslett overstyrer kamp-label på samme tid", () => {
     const structured = buildCupStructuredDayContent({
       ...base,
