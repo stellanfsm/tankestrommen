@@ -19,7 +19,6 @@ import type {
 } from "@/lib/types";
 import type { TravelFlightInference } from "@/lib/travel-document-infer";
 import {
-  normalizePortalProposalEventItem,
   parseKnownPersonsFromBody,
   resolvePortalEventPersonMatch,
   travelFlightMetadataFromInference,
@@ -36,17 +35,12 @@ import {
   resolveNonFlightEventTimes,
 } from "@/lib/event-time-resolve";
 import { isUncertainDurationContext, parseDurationMinutes } from "@/lib/parse-duration";
-import { currentSpan, flush, startSpan, traced } from "braintrust";
+import { currentSpan, flush, traced } from "braintrust";
 import { ensureBraintrustLoggerForProject, TANKESTROM_BRAINTRUST_PROJECT } from "@/lib/braintrust-init";
 import {
-  BT_TRUNC_BUNDLE_SNAPSHOT,
   BT_TRUNC_TRAVEL_BLOB,
-  mergeTelemetrySourceType,
-  portalBundleJsonSnapshot,
   safeFileNameForLog,
-  summarizePortalProposalItemsForBraintrust,
   truncateForBraintrust,
-  type BraintrustPortalItem,
 } from "@/lib/braintrust-analyze-telemetry";
 import {
   buildCupStructuredDayContent,
@@ -58,6 +52,13 @@ import {
   extractGlobalCupScheduleTimesForDay,
   isConditionalTournamentTextForDay,
 } from "@/lib/cup-timing-context";
+import {
+  type CupDayTiming,
+  extractAttendanceTimeFromDay,
+  resolveCupDayTiming,
+} from "@/lib/cup-resolve-day-timing";
+import { extractCupMatchTimes } from "@/lib/cup-match-times";
+import { registerPortalBundleRuntime, toPortalBundle } from "@/lib/portal-bundle";
 
 function asNullableString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -1546,254 +1547,6 @@ function looksLikeFlightEventTitle(title: string): boolean {
 function hasExplicitTimeRange(raw: string | null | undefined): boolean {
   if (!raw) return false;
   return /\d{1,2}[.:]\d{2}\s*[-–]\s*\d{1,2}[.:]\d{2}/.test(raw);
-}
-
-function extractAttendanceTimeFromDay(day: DayScheduleEntry): string | null {
-  const pool = [day.time ?? "", day.details ?? "", ...day.highlights, ...day.notes].join("\n");
-  const m = /\boppm[oø]te(?:\s*kl\.?)?\s*(\d{1,2})[.:](\d{2})\b/i.exec(pool);
-  if (!m) return null;
-  const h = Number(m[1]);
-  const mm = Number(m[2]);
-  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
-  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-}
-
-type CupDayTiming = {
-  start: string | null;
-  end: string | null;
-  attendanceTime: string | null;
-  attendanceOffsetMinutes: number | null;
-  durationMinutes: number | null;
-  postEventBufferMinutes: number | null;
-  timeWindow?: { earliestStart: string; latestStart: string };
-  timePrecision: "exact" | "start_only" | "date_only" | "time_window";
-  startTimeSource: "explicit" | "missing_or_unreadable";
-  endTimeSource:
-    | "explicit"
-    | "computed_from_duration"
-    | "computed_from_duration_and_aftertime"
-    | "missing_or_unreadable";
-  requiresManualTimeReview: boolean;
-  timeComputation?: {
-    formula: string;
-    startTime?: string;
-    endTime?: string;
-    durationMinutes: number;
-    computedEndTime?: string;
-    computedStartTime?: string;
-  };
-};
-
-function hhmmToMinutesLocal(hhmm: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  if (!m) return null;
-  const h = Number(m[1]);
-  const mm = Number(m[2]);
-  if (!Number.isFinite(h) || !Number.isFinite(mm) || h < 0 || h > 23 || mm < 0 || mm > 59)
-    return null;
-  return h * 60 + mm;
-}
-
-function minutesToHhmmLocal(total: number): string {
-  const t = ((total % 1440) + 1440) % 1440;
-  const h = Math.floor(t / 60);
-  const m = t % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-function shiftHhmmLocal(hhmm: string, delta: number): string | null {
-  const m = hhmmToMinutesLocal(hhmm);
-  if (m == null) return null;
-  return minutesToHhmmLocal(m + delta);
-}
-
-function parseCupAttendanceOffsetMinutes(text: string): number | null {
-  const m =
-    /\b(?:oppm[oø]te|m[oø]ter(?:\s+ferdig\s+skiftet)?)\b[^.!?\n]{0,70}?(\d{1,3})\s*min(?:utter)?\s*f[øo]r\b/i.exec(
-      text,
-    ) ||
-    /\b(\d{1,3})\s*min(?:utter)?\s*f[øo]r\b[^.!?\n]{0,70}?\b(?:kamp|oppm[oø]te)\b/i.exec(text);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) && n > 0 && n <= 180 ? n : null;
-}
-
-function parseCupMatchDurationMinutes(text: string): number | null {
-  const normalized = normalizeNorwegianLetters(text).toLowerCase();
-  const mult =
-    /\b(\d{1,2})\s*x\s*(\d{1,2})\s*min(?:utter)?\b/.exec(normalized) ||
-    /\b(\d{1,2})\s*omganger?[^\d]{0,12}(\d{1,2})\s*min(?:utter)?\b/.exec(normalized);
-  if (mult) {
-    const rounds = Number(mult[1]);
-    const per = Number(mult[2]);
-    if (!Number.isFinite(rounds) || !Number.isFinite(per) || rounds <= 0 || per <= 0) return null;
-    let total = rounds * per;
-    const pause = /(?:\+\s*|og\s+)(\d{1,2})\s*min(?:utter)?\s*pause\b/.exec(normalized);
-    if (pause) {
-      const p = Number(pause[1]);
-      if (Number.isFinite(p) && p > 0 && p <= 45) total += p;
-    }
-    return total;
-  }
-  return parseDurationMinutes(text);
-}
-
-function parseCupPostEventBufferMinutes(text: string): number | null {
-  const normalized = normalizeNorwegianLetters(text).toLowerCase();
-  const half = /\b(?:ikke\s+ute\s+for|ikke\s+ferdig\s+for)[^.!?\n]{0,60}?(?:en\s+halvtime|halvtime)\b/.exec(
-    normalized,
-  );
-  if (half) return 30;
-  const m =
-    /\b(?:ikke\s+ute\s+for|ikke\s+ferdig\s+for|etter\s+kampen|etter\s+siste\s+kamp)\b[^.!?\n]{0,80}?(\d{1,3})\s*min(?:utter)?\b/.exec(
-      normalized,
-    );
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) && n > 0 && n <= 180 ? n : null;
-}
-
-function hasVagueAfterLastMatchText(text: string): boolean {
-  const n = normalizeNorwegianLetters(text).toLowerCase();
-  return /\b(etter\s+siste\s+kamp)\b/.test(n) && /\b(rydde|snakke|kort|beskjed|en\s+stund|litt\s+tid)\b/.test(n);
-}
-
-function lineLooksLikeAdministrativeDeadline(line: string): boolean {
-  const n = normalizeNorwegianLetters(line).toLowerCase();
-  const adminSignal =
-    /\b(spond|svar|frist|senest|pamelding|påmelding|meld\s+fra|gi\s+beskjed|kommentarfelt)\b/.test(n);
-  if (!adminSignal) return false;
-  const activitySignal =
-    /\b(kamp|kampstart|forste\s+kamp|første\s+kamp|andre\s+kamp|oppmote|oppmøte|avreise|oppvarming)\b/.test(
-      n,
-    );
-  return !activitySignal;
-}
-
-function contextSuggestsAttendanceForTime(line: string, indexInLine: number): boolean {
-  const start = Math.max(0, indexInLine - 36);
-  const before = normalizeNorwegianLetters(line.slice(start, indexInLine));
-  return /\b(oppmote|oppmøte|m[oø]t(?:er)?)\b/.test(before);
-}
-
-function extractCupMatchTimes(text: string): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const lines = text.split(/\n+/);
-  const re = /(?:\b(?:kamp(?:start)?|forste\s+kamp|første\s+kamp|andre\s+kamp)\b[^.!?\n]{0,24}?)?(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/gi;
-  for (const lineRaw of lines) {
-    const line = normalizeSpace(lineRaw);
-    if (!line || lineLooksLikeAdministrativeDeadline(line)) continue;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(line)) !== null) {
-      if (contextSuggestsAttendanceForTime(line, m.index)) continue;
-      const hhmm = `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`;
-      if (hhmmToMinutesLocal(hhmm) == null || seen.has(hhmm)) continue;
-      seen.add(hhmm);
-      out.push(hhmm);
-    }
-  }
-  return out;
-}
-
-function resolveCupDayTiming(input: {
-  day: DayScheduleEntry;
-  detailsForEvent: string | null;
-  highlightsForEventFinal: string[];
-  notesOnlyForEvent: string[];
-  rememberForEvent: string[];
-  deadlinesForEvent: string[];
-  conditionalDay: boolean;
-}): CupDayTiming {
-  const blob = [
-    input.day.time ?? "",
-    input.detailsForEvent ?? "",
-    ...input.highlightsForEventFinal,
-    ...input.notesOnlyForEvent,
-    ...input.rememberForEvent,
-    ...input.deadlinesForEvent,
-  ].join("\n");
-
-  const twParsed = parseCupTimeWindow(blob);
-  if (twParsed) {
-    return {
-      start: null,
-      end: null,
-      attendanceTime: null,
-      attendanceOffsetMinutes: null,
-      durationMinutes: null,
-      postEventBufferMinutes: null,
-      timeWindow: { earliestStart: twParsed.earliestStart, latestStart: twParsed.latestStart },
-      timePrecision: "time_window",
-      startTimeSource: "missing_or_unreadable",
-      endTimeSource: "missing_or_unreadable",
-      requiresManualTimeReview: true,
-    };
-  }
-
-  const r = resolveNonFlightEventTimes({ timeField: input.day.time, contextBlob: blob });
-  const matchTimes = extractCupMatchTimes(blob);
-  const durationMinutes = parseCupMatchDurationMinutes(blob);
-  const attendanceOffsetMinutes = parseCupAttendanceOffsetMinutes(blob);
-  const postEventBufferMinutes = parseCupPostEventBufferMinutes(blob);
-  const vagueAfter = hasVagueAfterLastMatchText(blob);
-  const firstMatch = matchTimes[0] ?? r.start;
-  const lastMatch = matchTimes.length > 0 ? matchTimes[matchTimes.length - 1]! : r.start;
-  const attendanceTime =
-    firstMatch && attendanceOffsetMinutes != null
-      ? shiftHhmmLocal(firstMatch, -attendanceOffsetMinutes)
-      : extractAttendanceTimeFromDay(input.day);
-
-  let start: string | null = attendanceTime ?? firstMatch ?? r.start;
-  let end: string | null = r.end;
-  let endTimeSource: CupDayTiming["endTimeSource"] = r.end ? "explicit" : "missing_or_unreadable";
-  let timeComputation: CupDayTiming["timeComputation"] | undefined;
-
-  if (lastMatch && durationMinutes != null) {
-    const after = postEventBufferMinutes ?? 0;
-    const computed = shiftHhmmLocal(lastMatch, durationMinutes + after);
-    if (computed && (matchTimes.length <= 1 || postEventBufferMinutes != null) && !vagueAfter) {
-      end = computed;
-      endTimeSource = postEventBufferMinutes != null
-        ? "computed_from_duration_and_aftertime"
-        : "computed_from_duration";
-      timeComputation = {
-        formula:
-          postEventBufferMinutes != null
-            ? "start + duration + postEventBuffer = end"
-            : "start + duration = end",
-        startTime: lastMatch,
-        durationMinutes,
-        computedEndTime: computed,
-      };
-    } else if (matchTimes.length > 1 || vagueAfter) {
-      end = null;
-      endTimeSource = "missing_or_unreadable";
-    }
-  }
-
-  if (input.conditionalDay) {
-    start = null;
-    end = null;
-    endTimeSource = "missing_or_unreadable";
-  }
-
-  const timePrecision: CupDayTiming["timePrecision"] =
-    start && end ? "exact" : start ? "start_only" : "date_only";
-
-  return {
-    start,
-    end,
-    attendanceTime,
-    attendanceOffsetMinutes: attendanceOffsetMinutes ?? null,
-    durationMinutes: durationMinutes ?? null,
-    postEventBufferMinutes: postEventBufferMinutes ?? null,
-    timePrecision,
-    startTimeSource: start ? "explicit" : "missing_or_unreadable",
-    endTimeSource,
-    requiresManualTimeReview: !(start && end),
-    ...(timeComputation ? { timeComputation } : {}),
-  };
 }
 
 function composeDayNotes(
@@ -8583,282 +8336,6 @@ function decideSchoolWeekOverlayProposal(
   };
 }
 
-async function toPortalBundle(
-  resultIn: AIAnalysisResult,
-  sourceType: string,
-  documentKind: AnalysisDocumentKind | undefined,
-  includeDebug: boolean,
-  portalImport: PortalImportContext = { knownPersons: [] },
-): Promise<Record<string, unknown>> {
-  const btPortal = Boolean(process.env.BRAINTRUST_API_KEY?.trim());
-  if (btPortal) ensureBraintrustLoggerForProject();
-  const portalBundleSpan = btPortal ? startSpan({ name: "portal_bundle" }) : null;
-  try {
-  portalBundleSpan?.log({
-    input: {
-      projectName: TANKESTROM_BRAINTRUST_PROJECT,
-      sourceType,
-      documentKind: documentKind ?? null,
-      aiTitleTrunc: truncateForBraintrust(resultIn.title ?? "", 200),
-      extractedTextLen: resultIn.extractedText?.raw?.length ?? 0,
-    },
-  });
-
-  const { coerceAIAnalysisResultForPortal } = await import("@/lib/analysis-null-safety");
-  const result = coerceAIAnalysisResultForPortal(resultIn);
-  const { proposal: schoolProfileProposal, decision: schoolProfileDecision } = decideSchoolProfileProposal(
-    result,
-    sourceType,
-    documentKind,
-  );
-  const {
-    proposal: schoolWeekOverlayProposal,
-    decision: schoolWeekOverlayDecision,
-    noiseDebug: schoolWeekOverlayNoiseDebug,
-  } = schoolProfileProposal
-    ? {
-        proposal: undefined,
-        decision: {
-          path: "overlay_skipped",
-          reason: "school_profile_already_selected",
-        },
-        noiseDebug: undefined,
-      }
-    : decideSchoolWeekOverlayProposal(result, sourceType, documentKind);
-  const resolveDate = createPortalWeekDateResolver(result);
-  const weekContextForYear = [
-    result.title,
-    result.description,
-    ...result.scheduleByDay.map((d) => `${d.dayLabel ?? ""} ${d.date ?? ""}`),
-    ...result.schedule.map((s) => `${s.label ?? ""} ${s.date ?? ""}`),
-  ].join(" ");
-  const weekNumberForYear = parseWeekNumber(weekContextForYear);
-  const resolvedYear = inferRealisticYear(collectYearCandidates(result), weekNumberForYear);
-  const overlayHomeworkDebug: OverlayHomeworkTasksDebug | undefined = includeDebug
-    ? { accepted: [], rejected: [] }
-    : undefined;
-  const overlayHomeworkItems =
-    schoolWeekOverlayProposal && !schoolProfileProposal
-      ? buildHomeworkTaskItemsFromOverlay(
-          result,
-          sourceType,
-          schoolWeekOverlayProposal,
-          resolveDate,
-          overlayHomeworkDebug,
-        )
-      : [];
-  const rawProposalItems = schoolProfileProposal
-    ? []
-    : schoolWeekOverlayProposal
-      ? overlayHomeworkItems
-      : await buildProposalItems(result, sourceType, portalImport);
-  const { dedupePortalFlightDepartureArrivalEvents } = await import("@/lib/portal-flight-dedupe");
-  const travelDeduped = dedupePortalFlightDepartureArrivalEvents(rawProposalItems);
-  const fileErrors: Array<{
-    fileName?: string | null;
-    errorCode: string;
-    message: string;
-    debugMessage: string;
-    proposalId?: string;
-  }> = [];
-  const items: PortalProposalItem[] = [];
-  const normalizeSpan = btPortal ? startSpan({ name: "normalize_items" }) : null;
-  try {
-    normalizeSpan?.log({ input: { rawItemCount: travelDeduped.length } });
-    for (const it of travelDeduped) {
-      try {
-        if (it.kind === "event") {
-          items.push(normalizePortalProposalEventItem(it));
-        } else {
-          items.push(it);
-        }
-      } catch (err) {
-        console.error("[api/analyze] normalizePortalProposalEventItem failed", err);
-        fileErrors.push({
-          errorCode: "PROPOSAL_ITEM_NORMALIZE_FAILED",
-          message: "Kunne ikke normalisere et forslag fra dokumentet.",
-          debugMessage: err instanceof Error ? err.message : String(err),
-          proposalId: "proposalId" in it ? String(it.proposalId) : undefined,
-        });
-      }
-    }
-    normalizeSpan?.log({
-      output: {
-        normalizedItemCount: items.length,
-        normalizeFileErrors: fileErrors.length,
-      },
-    });
-  } finally {
-    normalizeSpan?.end();
-  }
-  const dedupedItems = dedupeArrangementChildEvents(items);
-  const arrangementSpan = btPortal ? startSpan({ name: "arrangement_linking_metadata" }) : null;
-  try {
-    const telem = mergeTelemetrySourceType(
-      summarizePortalProposalItemsForBraintrust(dedupedItems as unknown as BraintrustPortalItem[]),
-      sourceType,
-    );
-    const am = result.analysisModelTrace;
-    const updateIntentSample = dedupedItems
-      .filter((i): i is PortalEventItem => i.kind === "event")
-      .map((i) => i.event.metadata?.updateIntent)
-      .find((u) => u != null && typeof u === "object");
-    arrangementSpan?.log({
-      output: {
-        ...telem,
-        model: am?.finalModel ?? am?.initialModel ?? null,
-        tier: am?.initialTier ?? null,
-        bundleSnapshotTrunc: portalBundleJsonSnapshot(
-          dedupedItems as unknown as BraintrustPortalItem[],
-          BT_TRUNC_BUNDLE_SNAPSHOT,
-        ),
-        ...(updateIntentSample
-          ? {
-              updateIntentTrunc: truncateForBraintrust(
-                JSON.stringify(updateIntentSample),
-                2000,
-              ),
-            }
-          : {}),
-      },
-    });
-  } finally {
-    arrangementSpan?.end();
-  }
-  const secondaryTaskCandidates =
-    !schoolProfileProposal && !schoolWeekOverlayProposal
-      ? buildSecondaryPortalTaskCandidates(result, dedupedItems, resolveDate, resolvedYear, sourceType)
-      : [];
-  const pipelineSnapshot = {
-    extractedTextLength: result.extractedText?.raw?.length ?? 0,
-    documentKind: documentKind ?? null,
-    hasSchoolWeeklyProfile: Boolean(result.schoolWeeklyProfile),
-    schoolWeekOverlayBuilt: Boolean(schoolWeekOverlayProposal),
-    itemsLength: dedupedItems.length,
-    secondaryTaskCandidatesLength: secondaryTaskCandidates.length,
-    schoolProfileDecision: schoolProfileDecision.reason,
-    schoolWeekOverlayDecision: schoolWeekOverlayDecision.reason,
-  };
-  console.log("[api/analyze] school-routing", {
-    ...pipelineSnapshot,
-    schoolProfilePath: schoolProfileDecision.path,
-    schoolProfileReason: schoolProfileDecision.reason,
-    schoolProfileSignals: schoolProfileDecision.signals ?? [],
-    schoolWeekOverlayPath: schoolWeekOverlayDecision.path,
-    schoolWeekOverlayReason: schoolWeekOverlayDecision.reason,
-    schoolWeekOverlaySignals: schoolWeekOverlayDecision.signals ?? [],
-    hasSchoolProfileProposal: Boolean(schoolProfileProposal),
-    hasSchoolWeekOverlayProposal: Boolean(schoolWeekOverlayProposal),
-    itemCount: dedupedItems.length,
-  });
-  const debugPayload: Record<string, unknown> = {};
-  if (includeDebug) {
-    debugPayload.deploy = getDeployFingerprint();
-    debugPayload.schoolProfileRouting = schoolProfileDecision;
-    debugPayload.schoolWeekOverlayRouting = schoolWeekOverlayDecision;
-    debugPayload.pipelineSnapshot = pipelineSnapshot;
-    debugPayload.overlayRawDaySegments = segmentRawTextByWeekday(
-      result.extractedText?.raw ?? "",
-    );
-    if (schoolWeekOverlayNoiseDebug) {
-      debugPayload.overlayNoiseFilter = schoolWeekOverlayNoiseDebug;
-    }
-    if (schoolWeekOverlayNoiseDebug && overlayHomeworkDebug) {
-      const taskCountByDay = new Map<string, number>();
-      for (const a of overlayHomeworkDebug.accepted) {
-        taskCountByDay.set(a.dayIndex, (taskCountByDay.get(a.dayIndex) ?? 0) + 1);
-      }
-      for (const [dayIdx, n] of taskCountByDay) {
-        const dm = schoolWeekOverlayNoiseDebug.days[dayIdx];
-        if (dm) {
-          dm.overlayTasksBuiltFromRows = n;
-          dm.overlayTasksBuiltAfterOrphanAssignment = n;
-        }
-      }
-    }
-    if (schoolWeekOverlayProposal && overlayHomeworkDebug) {
-      debugPayload.overlayHomeworkTasks = overlayHomeworkDebug;
-    }
-    if (schoolWeekOverlayProposal) {
-      debugPayload.overlayDayDerivation = Object.entries(
-        schoolWeekOverlayProposal.dailyActions,
-      ).map(([day, action]) => ({
-        day,
-        action: action?.action ?? null,
-        summary: action?.summary ?? null,
-        reason: action?.reason ?? null,
-        summarySuppressedByStrongSections:
-          action?.summary === null &&
-          Boolean(
-            action?.subjectUpdates?.some(
-              (u) =>
-                (u.sections.iTimen?.length ?? 0) +
-                  (u.sections.lekse?.length ?? 0) +
-                  (u.sections.husk?.length ?? 0) +
-                  (u.sections.proveVurdering?.length ?? 0) +
-                  (u.sections.ressurser?.length ?? 0) >=
-                  2,
-            ),
-          ),
-        sectionKeys:
-          action?.subjectUpdates?.flatMap((u) =>
-            Object.entries(u.sections)
-              .filter(([, v]) => Array.isArray(v) && v.length > 0)
-              .map(([k]) => k),
-          ) ?? [],
-      }));
-    }
-  }
-  if (includeDebug && result.schoolWeeklyProfileDebug) {
-    debugPayload.schoolWeeklyProfile = result.schoolWeeklyProfileDebug;
-  }
-  if (includeDebug && result.analysisModelTrace) {
-    debugPayload.analysisModel = result.analysisModelTrace;
-  }
-  if (includeDebug && sourceType === "text") {
-    debugPayload.textAnalyzeTrace = {
-      textAnalyzeResponseShape: "PortalImportProposalBundle",
-      textAnalyzeWrappedBundle: true,
-      textAnalyzeSchemaVersion: "1.0.0",
-      textAnalyzePortalBundleReturned: true,
-    };
-  }
-  const bundleOut = {
-    schemaVersion: "1.0.0",
-    provenance: {
-      sourceSystem: "tankestrom",
-      sourceType,
-      generatedAt: new Date().toISOString(),
-      importRunId: randomUUID(),
-    },
-    items: dedupedItems,
-    fileErrors,
-    ...(secondaryTaskCandidates.length > 0 ? { secondaryTaskCandidates } : {}),
-    ...(schoolProfileProposal ? { schoolProfileProposal } : {}),
-    ...(schoolWeekOverlayProposal ? { schoolWeekOverlayProposal } : {}),
-    ...(Object.keys(debugPayload).length > 0 ? { debug: debugPayload } : {}),
-  };
-  portalBundleSpan?.log({
-    output: {
-      ...mergeTelemetrySourceType(
-        summarizePortalProposalItemsForBraintrust(dedupedItems as unknown as BraintrustPortalItem[]),
-        sourceType,
-      ),
-      schemaVersion: bundleOut.schemaVersion,
-      fileErrorsCount: fileErrors.length,
-      secondaryTaskCandidates: secondaryTaskCandidates.length,
-      schoolProfileProposal: Boolean(schoolProfileProposal),
-      schoolWeekOverlayProposal: Boolean(schoolWeekOverlayProposal),
-      model: result.analysisModelTrace?.finalModel ?? result.analysisModelTrace?.initialModel ?? null,
-      tier: result.analysisModelTrace?.initialTier ?? null,
-    },
-  });
-  return bundleOut;
-  } finally {
-    portalBundleSpan?.end();
-  }
-}
-
 function isDebugRequest(request: NextRequest): boolean {
   const p = request.nextUrl.searchParams.get("debug");
   if (p === "1" || p === "true") return true;
@@ -8980,6 +8457,21 @@ function stripInternalAnalysisDebug(result: AIAnalysisResult): AIAnalysisResult 
     result;
   return rest as AIAnalysisResult;
 }
+
+registerPortalBundleRuntime({
+  decideSchoolProfileProposal,
+  decideSchoolWeekOverlayProposal,
+  createPortalWeekDateResolver,
+  parseWeekNumber,
+  inferRealisticYear,
+  collectYearCandidates,
+  buildHomeworkTaskItemsFromOverlay,
+  buildProposalItems,
+  dedupeArrangementChildEvents,
+  buildSecondaryPortalTaskCandidates,
+  segmentRawTextByWeekday,
+  stripInternalAnalysisDebug,
+});
 
 /**
  * Detect portal-mode ONCE before the body is consumed.
