@@ -589,6 +589,19 @@ function parseAttendanceOffsetForEachMatch(text: string): number | null {
   return Number.isFinite(v) && v > 0 && v <= 180 ? v : null;
 }
 
+function parseExplicitAttendanceTimes(text: string): string[] {
+  const hits = new Set<string>();
+  const re =
+    /\b(?:oppm[oø]te|m[oø]t(?:er)?)\b[^.!?\n]{0,90}?\bkl\.?\s*(\d{1,2})[.:](\d{2})\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const hh = String(Number(m[1])).padStart(2, "0");
+    const mm = m[2];
+    hits.add(`${hh}:${mm}`);
+  }
+  return [...hits];
+}
+
 function highlightCoversTime(list: string[], hhmm: string): boolean {
   for (const h of list) {
     if (h.startsWith(`${hhmm} `)) return true;
@@ -680,6 +693,19 @@ export function enrichCupStructuredContentWithResolvedTiming(
       const attPerMatch = shiftHhmmLocal(t, -perMatchOffset);
       if (!attPerMatch || highlightCoversTime(highlights, attPerMatch)) continue;
       highlights.push(`${attPerMatch} Oppmøte`);
+    }
+  }
+
+  const explicitAttendanceTimes = parseExplicitAttendanceTimes(blob);
+  if (explicitAttendanceTimes.length > 0) {
+    highlights = highlights.map((h) => {
+      const m = /^(\d{2}:\d{2})\s+(.+)$/.exec(h);
+      if (!m) return h;
+      if (!explicitAttendanceTimes.includes(m[1]!)) return h;
+      return `${m[1]} Oppmøte`;
+    });
+    for (const t of explicitAttendanceTimes) {
+      if (!highlightCoversTime(highlights, t)) highlights.push(`${t} Oppmøte`);
     }
   }
 

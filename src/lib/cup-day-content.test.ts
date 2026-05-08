@@ -233,6 +233,33 @@ describe("buildCupStructuredDayContent (Høstcupen-regresjon)", () => {
     expect(new Set(enriched.highlights).size).toBe(enriched.highlights.length);
   });
 
+  it("eksplisitt oppmøte-klokkeslett overstyrer kamp-label på samme tid", () => {
+    const structured = buildCupStructuredDayContent({
+      ...base,
+      details: null,
+      highlights: ["17:45 Kamp", "18:40 Kamp"],
+      notes: [],
+      rememberItems: [],
+      deadlines: [],
+    });
+    const enriched = enrichCupStructuredContentWithResolvedTiming(structured, {
+      date: "2026-05-08",
+      parentTitleNorm: "varcupen",
+      childTitleNorm: "varcupen fredag",
+      sourceBlob:
+        "Oppmøte fredag er kl. 17:45 ved baneområdet på Ekeberg, altså 55 minutter før kampstart. Kampstart er 18:40.",
+      attendanceTime: null,
+      orderedMatchTimes: ["17:45", "18:40"],
+      daySegmentStart: "17:45",
+      daySegmentEnd: null,
+      timeWindow: null,
+      timePrecision: "start_only",
+      tentative: false,
+    });
+    expect(enriched.highlights).toContain("17:45 Oppmøte");
+    expect(enriched.highlights).toContain("18:40 Kamp");
+  });
+
   it("Test C: highlight-label som matcher event title droppes", () => {
     const structured = buildCupStructuredDayContent({
       ...base,

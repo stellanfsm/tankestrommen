@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:tankestrom-regression": "vitest run src/lib/tankestrom-regression.test.ts"
   },
   "dependencies": {
     "braintrust": "^3.10.0",
