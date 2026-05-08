@@ -1658,16 +1658,33 @@ function hasVagueAfterLastMatchText(text: string): boolean {
   return /\b(etter\s+siste\s+kamp)\b/.test(n) && /\b(rydde|snakke|kort|beskjed|en\s+stund|litt\s+tid)\b/.test(n);
 }
 
+function lineLooksLikeAdministrativeDeadline(line: string): boolean {
+  const n = normalizeNorwegianLetters(line).toLowerCase();
+  const adminSignal =
+    /\b(spond|svar|frist|senest|pamelding|påmelding|meld\s+fra|gi\s+beskjed|kommentarfelt)\b/.test(n);
+  if (!adminSignal) return false;
+  const activitySignal =
+    /\b(kamp|kampstart|forste\s+kamp|første\s+kamp|andre\s+kamp|oppmote|oppmøte|avreise|oppvarming)\b/.test(
+      n,
+    );
+  return !activitySignal;
+}
+
 function extractCupMatchTimes(text: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  const re = /(?:\b(?:kamp(?:start)?|forste\s+kamp|andre\s+kamp|kamp)\b[^.!?\n]{0,16}?)?(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const hhmm = `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`;
-    if (hhmmToMinutesLocal(hhmm) == null || seen.has(hhmm)) continue;
-    seen.add(hhmm);
-    out.push(hhmm);
+  const lines = text.split(/\n+/);
+  const re = /(?:\b(?:kamp(?:start)?|forste\s+kamp|første\s+kamp|andre\s+kamp)\b[^.!?\n]{0,24}?)?(?:kl\.?\s*)?(\d{1,2})[.:](\d{2})\b/gi;
+  for (const lineRaw of lines) {
+    const line = normalizeSpace(lineRaw);
+    if (!line || lineLooksLikeAdministrativeDeadline(line)) continue;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      const hhmm = `${String(Number(m[1])).padStart(2, "0")}:${m[2]}`;
+      if (hhmmToMinutesLocal(hhmm) == null || seen.has(hhmm)) continue;
+      seen.add(hhmm);
+      out.push(hhmm);
+    }
   }
   return out;
 }

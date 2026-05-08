@@ -13,6 +13,12 @@ describe("Tankestrømmen regression harness", () => {
     t.expectChildTitles(["Vårcupen – fredag", "Vårcupen – lørdag", "Vårcupen – søndag"]);
     t.expectDayHighlights("fredag", ["17:45 Oppmøte", "18:40 Kamp"]);
     t.expectDayHighlights("lørdag", ["08:35 Oppmøte", "09:20 Kamp", "14:25 Oppmøte", "15:10 Kamp"]);
+    t.expectDayHighlightsNotContaining("lørdag", ["19:15", "20:00", "spond", "om barnet kan delta", "svarfrist"]);
+    t.expectTaskDeadline({
+      titleIncludes: "Svar i Spond",
+      date: "2026-06-08",
+      dueTime: "20:00",
+    });
     t.expectTimePrecision("søndag", "date_only");
     t.expectTentativeOnlyForDay("søndag");
     t.expectNoEventTitleAsHighlight();

@@ -30,6 +30,11 @@ export type RegressionChild = {
 export type RegressionPortalBundle = {
   parentTitle: string;
   children: RegressionChild[];
+  tasks: Array<{
+    title: string;
+    date: string | null;
+    dueTime: string | null;
+  }>;
 };
 
 function normalizeSpace(input: string): string {
@@ -149,6 +154,60 @@ function inferParentTitle(text: string): string {
   return first || "Arrangement";
 }
 
+function parseMonthToken(raw: string): string | null {
+  const monthMap: Record<string, string> = {
+    januar: "01",
+    februar: "02",
+    mars: "03",
+    april: "04",
+    mai: "05",
+    juni: "06",
+    juli: "07",
+    august: "08",
+    september: "09",
+    oktober: "10",
+    november: "11",
+    desember: "12",
+  };
+  return monthMap[normalizeNorwegianLetters(raw)] ?? null;
+}
+
+function parseSpondDeadlineTask(
+  text: string,
+  parentTitle: string,
+): { title: string; date: string | null; dueTime: string | null } | null {
+  const n = normalizeNorwegianLetters(text);
+  if (!/\bspond\b/.test(n) || !/\b(svar|gi\s+beskjed|meld\s+fra)\b/.test(n)) return null;
+  const deadlineBlobMatch =
+    /\b(?:svar|gi\s+beskjed|meld\s+fra)\b[\s\S]{0,180}?\bspond\b[\s\S]{0,180}?\b(?:senest|frist)\b[\s\S]{0,180}/i.exec(
+      text,
+    ) ||
+    /\bspond\b[\s\S]{0,180}?\b(?:senest|frist)\b[\s\S]{0,180}/i.exec(text);
+  const blob = deadlineBlobMatch?.[0] ?? text;
+
+  const dueM = /\bkl\.?\s*(\d{1,2})[.:](\d{2})\b/i.exec(blob);
+  const dueTime = dueM ? `${String(Number(dueM[1])).padStart(2, "0")}:${dueM[2]}` : null;
+
+  const year = Number((/\b(20\d{2})\b/.exec(text) ?? [])[1] ?? 2026);
+  const dateM = /\b(?:mandag|tirsdag|onsdag|torsdag|fredag|l[øo]rdag|s[øo]ndag)\s+(\d{1,2})\.\s*([a-zæøå]+)/i.exec(
+    blob,
+  );
+  let date: string | null = null;
+  if (dateM) {
+    const month = parseMonthToken(dateM[2] ?? "");
+    const day = Number(dateM[1]);
+    if (month && Number.isFinite(day) && day > 0 && day <= 31) {
+      date = `${year}-${month}-${String(day).padStart(2, "0")}`;
+    }
+  }
+
+  return {
+    title: `Svar i Spond om deltakelse i ${parentTitle}`,
+    date,
+    dueTime,
+  };
+}
+
 export function runTankestromFixture(fixturePath: string): RegressionPortalBundle {
   const fullPath = resolve(fixturePath);
   const text = readFileSync(fullPath, "utf8");
@@ -224,7 +283,11 @@ export function runTankestromFixture(fixturePath: string): RegressionPortalBundl
     }
   }
 
-  return { parentTitle, children };
+  const tasks: RegressionPortalBundle["tasks"] = [];
+  const spondTask = parseSpondDeadlineTask(text, parentTitle);
+  if (spondTask) tasks.push(spondTask);
+
+  return { parentTitle, children, tasks };
 }
 
 export function createRegressionAsserts(bundle: RegressionPortalBundle) {
@@ -279,6 +342,21 @@ export function createRegressionAsserts(bundle: RegressionPortalBundle) {
         if (c.day === day) expect(c.tentative).toBe(true);
         else expect(c.tentative).toBe(false);
       }
+    },
+    expectDayHighlightsNotContaining(day: DayKey, snippets: string[]) {
+      const child = bundle.children.find((c) => c.day === day);
+      expect(child).toBeTruthy();
+      const joined = (child?.highlights ?? []).join("\n").toLowerCase();
+      for (const s of snippets) expect(joined).not.toContain(s.toLowerCase());
+    },
+    expectTaskDeadline(expected: { titleIncludes: string; date: string; dueTime: string }) {
+      const hit = bundle.tasks.find(
+        (t) =>
+          normalizeNorwegianLetters(t.title).includes(normalizeNorwegianLetters(expected.titleIncludes)) &&
+          t.date === expected.date &&
+          t.dueTime === expected.dueTime,
+      );
+      expect(hit).toBeTruthy();
     },
   };
 }
