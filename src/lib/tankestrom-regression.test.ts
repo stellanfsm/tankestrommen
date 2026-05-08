@@ -11,9 +11,23 @@ describe("Tankestrømmen regression harness", () => {
     t.expectParentCount(1);
     t.expectChildCount(3);
     t.expectChildTitles(["Vårcupen – fredag", "Vårcupen – lørdag", "Vårcupen – søndag"]);
-    t.expectDayHighlights("fredag", ["17:45 Oppmøte", "18:40 Kamp"]);
-    t.expectDayHighlights("lørdag", ["08:35 Oppmøte", "09:20 Kamp", "14:25 Oppmøte", "15:10 Kamp"]);
-    t.expectDayHighlightsNotContaining("lørdag", ["19:15", "20:00", "spond", "om barnet kan delta", "svarfrist"]);
+    t.expectDayHighlights("fredag", ["17:45 Oppmøte", "18:40 Første kamp"]);
+    t.expectNoDayHighlightAt("fredag", "20:00");
+    t.expectNoDayHighlightContaining("fredag", "Spond");
+    t.expectNoDayHighlightContaining("fredag", "barnet kan delta");
+    t.expectNoDayHighlightContaining("fredag", "hvilke kamper dere ikke rekker");
+    t.expectDayHighlights("lørdag", [
+      "08:35 Oppmøte før første kamp",
+      "09:20 Første kamp",
+      "14:25 Oppmøte før andre kamp",
+      "15:10 Andre kamp",
+    ]);
+    t.expectNoDayHighlightAt("lørdag", "19:15");
+    t.expectNoDayHighlightAt("lørdag", "20:00");
+    t.expectNoDayHighlightContaining("lørdag", "Spond");
+    t.expectNoDayHighlightContaining("lørdag", "barnet kan delta");
+    t.expectNoDayHighlightContaining("lørdag", "svarfrist");
+    t.expectNoDeadlineHighlightInProgramDays();
     t.expectTaskDeadline({
       titleIncludes: "Svar i Spond",
       date: "2026-06-08",

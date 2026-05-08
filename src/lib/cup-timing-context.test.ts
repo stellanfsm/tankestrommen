@@ -82,8 +82,8 @@ describe("cup timing context regression (Vårcupen)", () => {
       timePrecision: "start_only",
       tentative: false,
     });
-    expect(saturday.highlights).toContain("08:35 Oppmøte");
-    expect(saturday.highlights).toContain("14:25 Oppmøte");
+    expect(saturday.highlights).toContain("08:35 Oppmøte før første kamp");
+    expect(saturday.highlights).toContain("14:25 Oppmøte før andre kamp");
     expect(saturday.highlights.some((h) => /^09:20\s+(Kamp|Første kamp)$/.test(h))).toBe(true);
     expect(saturday.highlights.some((h) => /^15:10\s+(Kamp|Andre kamp)$/.test(h))).toBe(true);
     expect(new Set(saturday.highlights).size).toBe(saturday.highlights.length);

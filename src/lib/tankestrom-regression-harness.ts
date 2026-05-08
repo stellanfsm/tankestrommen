@@ -307,6 +307,29 @@ export function createRegressionAsserts(bundle: RegressionPortalBundle) {
       expect(child).toBeTruthy();
       for (const h of highlights) expect(child!.highlights).toContain(h);
     },
+    expectNoDayHighlightAt(day: DayKey, hhmm: string) {
+      const child = bundle.children.find((c) => c.day === day);
+      expect(child).toBeTruthy();
+      expect(child!.highlights.some((h) => h.startsWith(`${hhmm} `))).toBe(false);
+    },
+    expectNoDayHighlightContaining(day: DayKey, snippet: string) {
+      const child = bundle.children.find((c) => c.day === day);
+      expect(child).toBeTruthy();
+      const lowered = normalizeNorwegianLetters(snippet);
+      expect(
+        child!.highlights.some((h) => normalizeNorwegianLetters(h).includes(lowered)),
+      ).toBe(false);
+    },
+    expectNoDeadlineHighlightInProgramDays() {
+      for (const c of bundle.children) {
+        for (const h of c.highlights) {
+          const n = normalizeNorwegianLetters(h);
+          expect(
+            /\b(spond|svar|frist|senest|pamelding|påmelding|om\s+barnet\s+kan\s+delta)\b/.test(n),
+          ).toBe(false);
+        }
+      }
+    },
     expectNoDuplicateDays() {
       const keys = bundle.children.map((c) => `${c.date ?? "none"}|${normalizeNorwegianLetters(c.day)}`);
       expect(new Set(keys).size).toBe(keys.length);

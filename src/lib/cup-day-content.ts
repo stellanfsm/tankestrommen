@@ -193,6 +193,18 @@ function highlightLabelIsTimeWindowJunk(label: string): boolean {
   );
 }
 
+function lineLooksLikeAdministrativeDeadline(line: string): boolean {
+  const n = normalizeNorwegianLetters(line);
+  const adminSignal =
+    /\b(spond|svar|frist|senest|pamelding|påmelding|meld\s+fra|gi\s+beskjed|kommentarfelt)\b/.test(n);
+  if (!adminSignal) return false;
+  const activitySignal =
+    /\b(kamp|kampstart|forste\s+kamp|første\s+kamp|andre\s+kamp|oppmote|oppmøte|avreise|oppvarming)\b/.test(
+      n,
+    );
+  return !activitySignal;
+}
+
 function cleanupCupHighlight(
   raw: string,
   titleBlocklist: Set<string>,
@@ -203,6 +215,7 @@ function cleanupCupHighlight(
   if (titleBlocklist.has(cupLineNormKey(input))) return null;
   if (parseCupTimeWindow(input)) return null;
   if (isCupParentPracticalLine(input)) return null;
+  if (lineLooksLikeAdministrativeDeadline(input)) return null;
 
   const tm = /(\d{1,2})[.:](\d{2})/.exec(input);
   if (!tm) return null;
@@ -602,6 +615,16 @@ function parseExplicitAttendanceTimes(text: string): string[] {
   return [...hits];
 }
 
+function ordinalAttendanceLabel(indexZeroBased: number, totalMatches: number): string {
+  if (totalMatches <= 1) return "Oppmøte";
+  const kamp = defaultMatchLabelByIndex(indexZeroBased).toLowerCase();
+  return `Oppmøte før ${kamp}`;
+}
+
+function isOrdinalAttendanceLabel(label: string): boolean {
+  return /^Oppmøte\s+før\s+/i.test(label.trim());
+}
+
 function highlightCoversTime(list: string[], hhmm: string): boolean {
   for (const h of list) {
     if (h.startsWith(`${hhmm} `)) return true;
@@ -671,11 +694,14 @@ export function enrichCupStructuredContentWithResolvedTiming(
       ? new Set([window.earliestStart, window.latestStart])
       : null;
 
-  const times = enrichment.orderedMatchTimes.filter((t) => !suppressTimes?.has(t));
+  const explicitAttendanceTimes = parseExplicitAttendanceTimes(blob);
+  const times = enrichment.orderedMatchTimes.filter(
+    (t) => !suppressTimes?.has(t) && !explicitAttendanceTimes.includes(t),
+  );
 
+  const timeLabelByMatch = new Map<string, string>();
   for (let i = 0; i < times.length; i++) {
     const t = times[i]!;
-    if (highlightCoversTime(highlights, t)) continue;
     const labelSingle = inferTimedActivityLabelFromText(blob);
     const label =
       times.length === 1
@@ -683,25 +709,53 @@ export function enrichCupStructuredContentWithResolvedTiming(
           ? defaultMatchLabelByIndex(0)
           : labelSingle
         : defaultMatchLabelByIndex(i);
+    timeLabelByMatch.set(t, label);
+  }
+
+  highlights = highlights
+    .filter((h) => {
+      const m = /^(\d{2}:\d{2})\s+(.+)$/.exec(h);
+      if (!m) return true;
+      const merged = `${m[1]} ${m[2]}`;
+      return !lineLooksLikeAdministrativeDeadline(merged);
+    })
+    .map((h) => {
+      const m = /^(\d{2}:\d{2})\s+(.+)$/.exec(h);
+      if (!m) return h;
+      const time = m[1]!;
+      const label = (m[2] ?? "").trim();
+      const target = timeLabelByMatch.get(time);
+      if (!target) return h;
+      const n = normalizeNorwegianLetters(label);
+      const genericMatchLabel = /^(kamp|kampstart)(\s+kl\.?)?$/.test(n);
+      if (genericMatchLabel) return `${time} ${target}`;
+      return h;
+    });
+
+  for (let i = 0; i < times.length; i++) {
+    const t = times[i]!;
+    if (highlightCoversTime(highlights, t)) continue;
+    const label = timeLabelByMatch.get(t) ?? defaultMatchLabelByIndex(i);
     if (!label || titleBlock.has(normKeyTimed(label))) continue;
     highlights.push(`${t} ${label}`);
   }
 
   const perMatchOffset = parseAttendanceOffsetForEachMatch(blob);
   if (perMatchOffset != null && times.length > 0) {
-    for (const t of times) {
+    for (let i = 0; i < times.length; i++) {
+      const t = times[i]!;
       const attPerMatch = shiftHhmmLocal(t, -perMatchOffset);
       if (!attPerMatch || highlightCoversTime(highlights, attPerMatch)) continue;
-      highlights.push(`${attPerMatch} Oppmøte`);
+      highlights.push(`${attPerMatch} ${ordinalAttendanceLabel(i, times.length)}`);
     }
   }
 
-  const explicitAttendanceTimes = parseExplicitAttendanceTimes(blob);
   if (explicitAttendanceTimes.length > 0) {
     highlights = highlights.map((h) => {
       const m = /^(\d{2}:\d{2})\s+(.+)$/.exec(h);
       if (!m) return h;
       if (!explicitAttendanceTimes.includes(m[1]!)) return h;
+      if (isOrdinalAttendanceLabel(m[2] ?? "")) return h;
       return `${m[1]} Oppmøte`;
     });
     for (const t of explicitAttendanceTimes) {
@@ -713,6 +767,8 @@ export function enrichCupStructuredContentWithResolvedTiming(
   if (att && /\boppm[oø]te\b/i.test(blob)) {
     highlights = highlights.map((h) => {
       if (!h.startsWith(`${att} `)) return h;
+      const current = h.replace(/^\d{2}:\d{2}\s+/, "");
+      if (isOrdinalAttendanceLabel(current)) return h;
       return `${att} Oppmøte`;
     });
   }

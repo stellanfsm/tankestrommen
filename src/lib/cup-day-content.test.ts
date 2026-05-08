@@ -226,9 +226,9 @@ describe("buildCupStructuredDayContent (Høstcupen-regresjon)", () => {
       timePrecision: "start_only",
       tentative: false,
     });
-    expect(enriched.highlights).toContain("08:30 Oppmøte");
+    expect(enriched.highlights).toContain("08:30 Oppmøte før første kamp");
     expect(enriched.highlights).toContain("09:15 Første kamp");
-    expect(enriched.highlights).toContain("13:55 Oppmøte");
+    expect(enriched.highlights).toContain("13:55 Oppmøte før andre kamp");
     expect(enriched.highlights).toContain("14:40 Andre kamp");
     expect(new Set(enriched.highlights).size).toBe(enriched.highlights.length);
   });
@@ -257,7 +257,7 @@ describe("buildCupStructuredDayContent (Høstcupen-regresjon)", () => {
       tentative: false,
     });
     expect(enriched.highlights).toContain("17:45 Oppmøte");
-    expect(enriched.highlights).toContain("18:40 Kamp");
+    expect(enriched.highlights).toContain("18:40 Første kamp");
   });
 
   it("Test C: highlight-label som matcher event title droppes", () => {
