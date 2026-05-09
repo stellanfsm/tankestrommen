@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "category": "activity",
+  "parentCount": 1,
+  "childCount": 3,
+  "childTitles": [
+    "Turnstevne 2026 – fredag",
+    "Turnstevne 2026 – lørdag",
+    "Turnstevne 2026 – søndag"
+  ],
+  "highlightsByDay": {},
+  "requiredBringItems": [],
+  "forbiddenInNotes": [],
+  "forbiddenHighlights": [],
+  "tentativeDays": {
+    "fredag": true,
+    "lørdag": true,
+    "søndag": true
+  },
+  "timePrecisionByDay": {
+    "fredag": "date_only",
+    "lørdag": "date_only",
+    "søndag": "date_only"
+  },
+  "requiredTasks": []
+}

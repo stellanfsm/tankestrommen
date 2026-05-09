@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "category": "cup",
+  "parentCount": 1,
+  "childCount": 3,
+  "childTitles": [
+    "Høstcupen – fredag",
+    "Høstcupen – lørdag",
+    "Høstcupen – søndag"
+  ],
+  "highlightsByDay": {
+    "fredag": ["17:30 Første kamp", "16:40 Oppmøte"]
+  },
+  "requiredBringItems": [],
+  "forbiddenInNotes": [],
+  "forbiddenHighlights": [],
+  "tentativeDays": {
+    "fredag": false,
+    "lørdag": false,
+    "søndag": true
+  },
+  "timePrecisionByDay": {
+    "fredag": "start_only",
+    "lørdag": "start_only",
+    "søndag": "date_only"
+  },
+  "requiredTasks": []
+}

@@ -9,7 +9,9 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:tankestrom-regression": "vitest run src/lib/tankestrom-regression.test.ts"
+    "test:tankestrom-regression": "vitest run src/lib/tankestrom-regression.test.ts",
+    "eval:tankestrom": "tsx --tsconfig tsconfig.json scripts/eval-tankestrom.ts",
+    "eval:tankestrom:dry": "tsx --tsconfig tsconfig.json scripts/eval-tankestrom.ts --dry"
   },
   "dependencies": {
     "braintrust": "^3.10.0",
@@ -32,6 +34,7 @@
     "eslint-config-next": "^14.2.0",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.4.0",
     "vitest": "^2.1.9"
   }
