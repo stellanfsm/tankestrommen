@@ -1,4 +1,16 @@
+import { getActiveTankestromEvalModelOverride } from "@/lib/eval/tankestrom-eval-model-override";
 import type { AIAnalysisResult, AnalysisModelTrace } from "@/lib/types";
+
+/**
+ * Modellvalg (produksjon):
+ * - Lett: OPENAI_ANALYSIS_MODEL_LIGHT → TANKESTROM_LIGHT_MODEL → gpt-4o-mini
+ * - Sterk: OPENAI_ANALYSIS_MODEL_STRONG → TANKESTROM_DEFAULT_MODEL → TANKESTROM_HEAVY_MODEL → gpt-4o
+ * - Bilde (første kall): OPENAI_ANALYSIS_MODEL_IMAGE → TANKESTROM_IMAGE_MODEL → samme som lett
+ * Se `selectInitialAnalysisModel` for dokumenttype → lett/sterk.
+ *
+ * Eval-only overstyr (alle tre over hopper over når aktiv): EVAL_TANKESTROM_MODEL eller `current`.
+ * Tillatelse: ikke produksjon, eller ALLOW_EVAL_MODEL_OVERRIDE=true. Se `tankestrom-eval-model-override.ts`.
+ */
 
 /**
  * Valgfri hint fra klient (multipart `documentKind` eller JSON `documentKind`).
@@ -34,10 +46,9 @@ function firstDefinedEnv(...keys: string[]): string | undefined {
 }
 
 /**
- * Lett modell (tekst/PDF/Word/auto, og bilde når ikke annet er satt).
- * Prioritet: OPENAI_ANALYSIS_MODEL_LIGHT → TANKESTROM_LIGHT_MODEL → gpt-4o-mini
+ * Konfigurert «lett» modell uten eval-overstyr (til sammenligning i telemetri).
  */
-export function getLightAnalysisModel(): string {
+export function getLightAnalysisModelBaseline(): string {
   return (
     firstDefinedEnv("OPENAI_ANALYSIS_MODEL_LIGHT", "TANKESTROM_LIGHT_MODEL") ??
     "gpt-4o-mini"
@@ -45,10 +56,9 @@ export function getLightAnalysisModel(): string {
 }
 
 /**
- * Sterk modell (timeplan/aktivitetsplan, og eskalering fra light).
- * Prioritet: OPENAI_ANALYSIS_MODEL_STRONG → TANKESTROM_DEFAULT_MODEL → TANKESTROM_HEAVY_MODEL → gpt-4o
+ * Konfigurert «sterk» modell uten eval-overstyr.
  */
-export function getStrongAnalysisModel(): string {
+export function getStrongAnalysisModelBaseline(): string {
   return (
     firstDefinedEnv(
       "OPENAI_ANALYSIS_MODEL_STRONG",
@@ -59,10 +69,32 @@ export function getStrongAnalysisModel(): string {
 }
 
 /**
+ * Lett modell (tekst/PDF/Word/auto, og bilde når ikke annet er satt).
+ * Prioritet: OPENAI_ANALYSIS_MODEL_LIGHT → TANKESTROM_LIGHT_MODEL → gpt-4o-mini
+ */
+export function getLightAnalysisModel(): string {
+  const evalModel = getActiveTankestromEvalModelOverride();
+  if (evalModel) return evalModel;
+  return getLightAnalysisModelBaseline();
+}
+
+/**
+ * Sterk modell (timeplan/aktivitetsplan, og eskalering fra light).
+ * Prioritet: OPENAI_ANALYSIS_MODEL_STRONG → TANKESTROM_DEFAULT_MODEL → TANKESTROM_HEAVY_MODEL → gpt-4o
+ */
+export function getStrongAnalysisModel(): string {
+  const evalModel = getActiveTankestromEvalModelOverride();
+  if (evalModel) return evalModel;
+  return getStrongAnalysisModelBaseline();
+}
+
+/**
  * Første modell ved bildeanalyse (auto + sourceRoute image).
  * Prioritet: OPENAI_ANALYSIS_MODEL_IMAGE → TANKESTROM_IMAGE_MODEL → samme som light.
  */
 export function getImageInitialAnalysisModel(): string {
+  const evalModel = getActiveTankestromEvalModelOverride();
+  if (evalModel) return evalModel;
   return (
     firstDefinedEnv("OPENAI_ANALYSIS_MODEL_IMAGE", "TANKESTROM_IMAGE_MODEL") ??
     getLightAnalysisModel()

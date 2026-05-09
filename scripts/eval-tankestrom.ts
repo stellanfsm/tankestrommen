@@ -7,15 +7,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadTankestromExpected, resolveExpectedPath } from "../src/evals/tankestrom-expected";
+import { TANKESTROM_FIXTURE_DEFS } from "../src/evals/tankestrom-fixtures";
 import { runAllTankestromScorers } from "../src/evals/tankestrom-scorers";
 import { runTankestromFixture } from "../src/lib/tankestrom-regression-fixture-runner";
 
-const FIXTURES = [
-  { id: "vaacup_original", rel: "fixtures/tankestrom/vaacup_original.txt" },
-  { id: "hostcup_handball", rel: "fixtures/tankestrom/hostcup_handball.txt" },
-  { id: "speiderhelg", rel: "fixtures/tankestrom/speiderhelg.txt" },
-  { id: "turnstevne", rel: "fixtures/tankestrom/turnstevne.txt" },
-] as const;
+const FIXTURES = TANKESTROM_FIXTURE_DEFS;
 
 const SCHEMA_VERSION = "tankestrom-eval-v1";
 const MODEL_LABEL = "tankestrom-regression-harness";
@@ -121,6 +117,8 @@ async function main(): Promise<void> {
     average: number;
     scores: Record<string, number>;
     failures: string[];
+    styleWarnings: string[];
+    semanticNearMisses: string[];
     latencyMs: number;
   }> = [];
 
@@ -132,7 +130,10 @@ async function main(): Promise<void> {
     const bundle = runTankestromFixture(fixturePath);
     const latencyMs = Math.round(performance.now() - t0);
 
-    const { scores, failures, average } = runAllTankestromScorers(bundle, expected);
+    const { scores, failures, styleWarnings, semanticNearMisses, average } = runAllTankestromScorers(
+      bundle,
+      expected,
+    );
     const category = expected.category ?? "unknown";
 
     const metadata: Record<string, unknown> = {
@@ -147,15 +148,21 @@ async function main(): Promise<void> {
       branch: tryGitBranch(),
       commit: tryGitSha(),
       failures,
+      styleWarnings,
+      semanticNearMisses,
     };
 
-    rows.push({ fixtureId: fx.id, average, scores, failures, latencyMs });
+    rows.push({ fixtureId: fx.id, average, scores, failures, styleWarnings, semanticNearMisses, latencyMs });
 
     if (dry) {
       console.log(`\n=== ${fx.id} ===`);
       console.log(`structureAverage: ${average.toFixed(4)}`);
       console.log("scores:", JSON.stringify(scores, null, 2));
-      if (failures.length) console.log("failures:\n", failures.join("\n"));
+      if (failures.length) console.log("criticalFailures:\n", failures.join("\n"));
+      if (styleWarnings.length) console.log("styleWarnings:\n", styleWarnings.join("\n"));
+      if (semanticNearMisses.length) {
+        console.log("semanticNearMisses:\n", semanticNearMisses.join("\n"));
+      }
     } else if (experiment) {
       const { structureAverage: _avg, ...scoresForBt } = scores;
       experiment.log({

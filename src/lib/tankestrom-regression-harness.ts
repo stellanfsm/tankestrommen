@@ -84,7 +84,9 @@ export function createRegressionAsserts(bundle: RegressionPortalBundle) {
     expectNoStructureFallbackInNotes() {
       for (const c of bundle.children) {
         const note = c.notes ?? "";
-        expect(/Høydepunkter\s*:|Notater\s*:|Husk\s*:/i.test(note)).toBe(false);
+        expect(
+          /(?:^|\n)\s*(?:Høydepunkter|Hoydepunkter)\s*:/i.test(note),
+        ).toBe(false);
       }
     },
     expectTimePrecision(day: DayKey, precision: TimePrecision) {

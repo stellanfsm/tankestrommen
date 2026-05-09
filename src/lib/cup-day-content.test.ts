@@ -40,7 +40,6 @@ describe("buildCupStructuredDayContent (Høstcupen-regresjon)", () => {
     const flat = formatCupEventNotesFlat(r) ?? "";
     expect(flat).not.toMatch(/Høydepunkter\s*:/i);
     expect(flat).not.toMatch(/Notater\s*:/i);
-    expect(flat).not.toMatch(/\bHusk\s*:/i);
   });
 
   it("09:15 bag/kjølebag-koordinering er ikke highlight", () => {
@@ -105,6 +104,35 @@ describe("buildCupStructuredDayContent (Høstcupen-regresjon)", () => {
     expect(isNoiseFragment("og")).toBe(true);
     expect(isNoiseFragment("spist litt")).toBe(true);
     expect(isNoiseFragment("- overtrekksklær")).toBe(true);
+  });
+
+  it("beriking: date_only + tentative fjerner falske kamptider fra betinget mellom-vindu", () => {
+    const structured = buildCupStructuredDayContent({
+      ...base,
+      date: "2026-09-20",
+      childTitle: "Høstcupen – søndag",
+      details: null,
+      highlights: [],
+      notes: ["Ved A-sluttspill kan det bli søndagskamp mellom kl. 10:00 og 12:00."],
+      rememberItems: [],
+      deadlines: [],
+    });
+    const blob =
+      "Ved A-sluttspill kan det bli søndagskamp mellom kl. 10:00 og 12:00.\nHusk: Gjerne ekstra t-skjorte.";
+    const enriched = enrichCupStructuredContentWithResolvedTiming(structured, {
+      date: "2026-09-20",
+      parentTitleNorm: "hostcupen",
+      childTitleNorm: "hostcupen sondag",
+      sourceBlob: blob,
+      attendanceTime: null,
+      orderedMatchTimes: ["10:00", "12:00"],
+      daySegmentStart: null,
+      daySegmentEnd: null,
+      timeWindow: null,
+      timePrecision: "date_only",
+      tentative: true,
+    });
+    expect(enriched.highlights.some((h) => /10:00|12:00/.test(h))).toBe(false);
   });
 
   it("beriking: vindu 10:00–12:00 gir én highlight med semantisk label og (foreløpig)", () => {

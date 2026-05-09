@@ -48,11 +48,28 @@ function normalizeNorwegianLetters(input: string): string {
     .replace(/æ/g, "e");
 }
 
+/** Unngå at «kl.» og «18. september»-datoer blir falske setningsgrenser (ødelegger blob for cup-dager). */
+const MASK_DOT = "\uE040";
+
+function maskNorwegianNonSentenceDots(line: string): string {
+  const months =
+    "januar|februar|mars|april|mai|juni|juli|august|september|oktober|november|desember";
+  const dateDot = new RegExp(`\\b(\\d{1,2})\\.(\s+)(${months})\\b`, "gi");
+  return line.replace(/\bkl\./gi, `kl${MASK_DOT}`).replace(dateDot, (_m, d, sp, mo) => `${d}${MASK_DOT}${sp}${mo}`);
+}
+
+function unmaskNorwegianDots(s: string): string {
+  return s.replaceAll(MASK_DOT, ".");
+}
+
 function splitSentences(text: string): string[] {
   return text
     .split(/\n+/)
-    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
-    .map((s) => normalizeSpace(s))
+    .flatMap((line) => {
+      const masked = maskNorwegianNonSentenceDots(line);
+      return masked.split(/(?<=[.!?])\s+/);
+    })
+    .map((s) => normalizeSpace(unmaskNorwegianDots(s)))
     .filter(Boolean);
 }
 

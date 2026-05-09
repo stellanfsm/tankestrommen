@@ -127,6 +127,35 @@ function hasVagueAfterLastMatchText(text: string): boolean {
   return /\b(etter\s+siste\s+kamp)\b/.test(n) && /\b(rydde|snakke|kort|beskjed|en\s+stund|litt\s+tid)\b/.test(n);
 }
 
+type CupWeekdayKey = "fredag" | "lordag" | "sondag";
+
+function cupWeekdayKeyFromDayLabel(label: string | null): CupWeekdayKey | null {
+  const n = normalizeNorwegianLetters(label ?? "");
+  if (/\bfri(day)?|fredag\b/.test(n)) return "fredag";
+  if (/\blordag|l[øo]rdag|saturday\b/.test(n)) return "lordag";
+  if (/\bsondag|s[øo]ndag|sunday\b/.test(n)) return "sondag";
+  return null;
+}
+
+/**
+ * «Mellom … og …» i tekst om søndagskamp (f.eks. «søndagskamp mellom 10 og 12») skal ikke gi
+ * `time_window` for fredag/lørdag når blob deles på tvers av cup-dager.
+ */
+function parseCupTimeWindowForScheduleDay(
+  blob: string,
+  dayLabel: string | null,
+): ReturnType<typeof parseCupTimeWindow> | null {
+  const tw = parseCupTimeWindow(blob);
+  if (!tw) return null;
+  const key = cupWeekdayKeyFromDayLabel(dayLabel);
+  if (!key || key === "sondag") return tw;
+  const n = normalizeNorwegianLetters(blob);
+  const sundayPlayoffMellom =
+    /\bmellom\b/.test(n) && /\b(sondagskamp|kamp\s+p[aå]\s+sondag)\b/.test(n);
+  if (sundayPlayoffMellom) return null;
+  return tw;
+}
+
 export function resolveCupDayTiming(input: {
   day: DayScheduleEntry;
   detailsForEvent: string | null;
@@ -145,8 +174,8 @@ export function resolveCupDayTiming(input: {
     ...input.deadlinesForEvent,
   ].join("\n");
 
-  const twParsed = parseCupTimeWindow(blob);
-  if (twParsed) {
+  const twParsed = parseCupTimeWindowForScheduleDay(blob, input.day.dayLabel);
+  if (twParsed && !input.conditionalDay) {
     return {
       start: null,
       end: null,

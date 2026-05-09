@@ -107,7 +107,14 @@ export function isConditionalTournamentTextForDay(
   if (/\b(avhengig|evt\.?|eventuell|eventuelle)\b/.test(n) && /\b(sluttspill|cup|finale|spill|kamp)\b/.test(n))
     return true;
   if (/\beventuell\w*\b/.test(n) && /\b(sluttspill|kamp|finale|cup|a-)\b/.test(n)) return true;
-  if (/\ba-?sluttspill\b/.test(n)) return true;
+  if (/\ba-?sluttspill\b/.test(n)) {
+    const sundayOnlyPlayoffMention =
+      dayKey &&
+      dayKey !== "sondag" &&
+      /\b(sondagskamp|sondag\s+kamp|kamp\s+pa\s+sondag)\b/.test(n);
+    if (sundayOnlyPlayoffMention) return false;
+    return true;
+  }
   if (/\btidspunkt\s+kommer\b/.test(n)) return true;
   if (/\b(kommer|publiseres)\s+senere\b/.test(n)) return true;
   if (/\bikke\s+fastsatt\b/.test(n)) return true;

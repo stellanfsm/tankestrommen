@@ -873,6 +873,15 @@ export function enrichCupStructuredContentWithResolvedTiming(
     return true;
   });
 
+  if (enrichment.timePrecision === "date_only" && enrichment.tentative) {
+    const twFromBlob = parseCupTimeWindow(blob);
+    if (twFromBlob) {
+      highlights = highlights.filter((h) => !/^\d{2}:\d{2}/.test(h));
+    } else {
+      highlights = highlights.filter((h) => !/^\d{2}:\d{2}[–-]\d{2}:\d{2}\s+/.test(h));
+    }
+  }
+
   const promoteLabelKeys = new Set<string>();
   for (const h of highlights) {
     const m = /^\d{2}:\d{2}(?:[–-]\d{2}:\d{2})?\s+(.+)$/.exec(h);

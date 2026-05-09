@@ -53,5 +53,8 @@ describe("Tankestrømmen regression harness", () => {
     t.expectNoDateTokensInChildTitles();
     t.expectNoEventTitleAsHighlight();
     t.expectNoStructureFallbackInNotes();
+    t.expectTimePrecision("søndag", "date_only");
+    t.expectTentativeOnlyForDay("søndag");
+    t.expectDayHighlightsNotContaining("søndag", ["10:00", "12:00", "09:15", "17:30", "14:40"]);
   });
 });

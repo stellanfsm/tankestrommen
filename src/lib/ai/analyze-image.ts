@@ -2062,10 +2062,37 @@ function parseAIResponseWithSource(
   return normalizeAIAnalysisResult(parsed, sourceText);
 }
 
+type RoutedOpenAIUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+};
+
+type RoutedModelCallResult = {
+  result: AIAnalysisResult;
+  usage: RoutedOpenAIUsage | null;
+};
+
+function usageFromCompletion(completion: {
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+}): RoutedOpenAIUsage | null {
+  const u = completion.usage;
+  if (!u) return null;
+  const { prompt_tokens, completion_tokens, total_tokens } = u;
+  if (
+    prompt_tokens == null &&
+    completion_tokens == null &&
+    total_tokens == null
+  ) {
+    return null;
+  }
+  return { prompt_tokens, completion_tokens, total_tokens };
+}
+
 async function analyzeImageWithModel(
   imageBase64: string,
   model: string,
-): Promise<AIAnalysisResult> {
+): Promise<RoutedModelCallResult> {
   const openai = getOpenAIClient();
   const imageUrl = toDataUrl(imageBase64);
 
@@ -2099,13 +2126,13 @@ async function analyzeImageWithModel(
     });
   }
 
-  return parseAIResponse(raw);
+  return { result: parseAIResponse(raw), usage: usageFromCompletion(completion) };
 }
 
 async function analyzeTextWithModel(
   text: string,
   model: string,
-): Promise<AIAnalysisResult> {
+): Promise<RoutedModelCallResult> {
   const openai = getOpenAIClient();
 
   const completion = await openai.chat.completions.create({
@@ -2135,7 +2162,7 @@ async function analyzeTextWithModel(
     });
   }
 
-  return parseAIResponse(raw);
+  return { result: parseAIResponse(raw), usage: usageFromCompletion(completion) };
 }
 
 const DOCUMENT_IMAGE_TRANSCRIBE_PROMPT = `Du ser et utsnitt fra et dokument (Word eller PDF) som norske foreldre skal forstå.
@@ -2249,11 +2276,20 @@ function runRoutedTextAnalysis(
  */
 async function runRoutedVisionLikeAnalysisCore(
   initial: ReturnType<typeof selectInitialAnalysisModel>,
-  runWithModel: (model: string) => Promise<AIAnalysisResult>,
+  runWithModel: (model: string) => Promise<RoutedModelCallResult>,
   modelCallContext: ModelCallTraceContext,
 ): Promise<{ result: AIAnalysisResult; modelTrace: AnalysisModelTrace }> {
   const strong = getStrongAnalysisModel();
   const trace = emptyAnalysisModelTrace(initial);
+  const tokenUsageCalls: NonNullable<AnalysisModelTrace["tokenUsageCalls"]> = [];
+
+  const run = async (model: string): Promise<AIAnalysisResult> => {
+    const out = await runWithModel(model);
+    if (out.usage) {
+      tokenUsageCalls.push({ model, ...out.usage });
+    }
+    return out.result;
+  };
 
   console.info("[Tankestrom model selected]", {
     sourceType: modelCallContext.sourceRoute,
@@ -2279,30 +2315,32 @@ async function runRoutedVisionLikeAnalysisCore(
   });
 
   try {
-    let result = await runWithModel(initial.model);
+    let result = await run(initial.model);
     if (initial.tier === "light") {
       const weak = analysisLooksWeakForEscalation(result);
       if (weak.weak) {
         trace.reasons.push(`escalate:weak:${weak.reason ?? "unknown"}`);
-        result = await runWithModel(strong);
+        result = await run(strong);
         trace.escalated = true;
         trace.finalModel = strong;
         console.log("[analysis-model] escalated (weak)", { finalModel: strong });
       }
     }
+    if (tokenUsageCalls.length > 0) trace.tokenUsageCalls = tokenUsageCalls;
     return { result, modelTrace: trace };
   } catch (err) {
     if (initial.tier === "light") {
       trace.reasons.push(
         `escalate:error:${err instanceof Error ? err.message : String(err)}`,
       );
-      const result = await runWithModel(strong);
+      const result = await run(strong);
       trace.escalated = true;
       trace.finalModel = strong;
       console.warn("[analysis-model] escalated (error)", {
         finalModel: strong,
         err,
       });
+      if (tokenUsageCalls.length > 0) trace.tokenUsageCalls = tokenUsageCalls;
       return { result, modelTrace: trace };
     }
     throw err;
@@ -2311,7 +2349,7 @@ async function runRoutedVisionLikeAnalysisCore(
 
 async function runRoutedVisionLikeAnalysis(
   initial: ReturnType<typeof selectInitialAnalysisModel>,
-  runWithModel: (model: string) => Promise<AIAnalysisResult>,
+  runWithModel: (model: string) => Promise<RoutedModelCallResult>,
   modelCallContext: ModelCallTraceContext,
 ): Promise<{ result: AIAnalysisResult; modelTrace: AnalysisModelTrace }> {
   if (!process.env.BRAINTRUST_API_KEY?.trim()) {

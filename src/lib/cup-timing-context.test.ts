@@ -40,6 +40,13 @@ describe("cup timing context regression (Vårcupen)", () => {
     expect(isConditionalTournamentTextForDay(sundayBlob, "søndag")).toBe(true);
   });
 
+  it("A-sluttspill kun som søndagskamp merker ikke fredag som betinget (Høstcupen)", () => {
+    const blob =
+      "Helg: fredag 18. september. Ved A-sluttspill kan det bli søndagskamp mellom kl. 10:00 og 12:00.";
+    expect(isConditionalTournamentTextForDay(blob, "fredag")).toBe(false);
+    expect(isConditionalTournamentTextForDay(blob, "søndag")).toBe(true);
+  });
+
   it("bygger highlights fra global schedule + oppmøte-regler uten duplikater", () => {
     const base = {
       parentTitle: "Vårcupen",

@@ -221,6 +221,13 @@ export interface AnalysisModelTrace {
   finalModel: string;
   escalated: boolean;
   reasons: string[];
+  /** Valgfri aggregering av OpenAI chat.completions usage (tekst/bilde-kall). */
+  tokenUsageCalls?: Array<{
+    model: string;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  }>;
 }
 
 /** Debug-rapport per dag fra normalisering av skoleprofil. */
