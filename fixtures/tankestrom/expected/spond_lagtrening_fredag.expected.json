@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "category": "team_message",
+  "parentCount": 1,
+  "childCount": 1,
+  "childTitles": ["Guttelaget – beskjed uke 42 – fredag"],
+  "highlightsByDay": {
+    "fredag": ["17:45 Oppmøte", "18:30 Første kamp"]
+  },
+  "requiredBringItems": [],
+  "forbiddenInNotes": [],
+  "forbiddenHighlights": [],
+  "tentativeDays": {
+    "fredag": false
+  },
+  "timePrecisionByDay": {
+    "fredag": "date_only"
+  },
+  "requiredTasks": [
+    {
+      "titleIncludes": "Spond",
+      "date": "2026-11-06",
+      "dueTime": null
+    }
+  ]
+}

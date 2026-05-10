@@ -8,6 +8,9 @@ export const TANKESTROM_FIXTURE_DEFS: TankestromFixtureDef[] = [
   { id: "hostcup_handball", rel: "fixtures/tankestrom/hostcup_handball.txt" },
   { id: "speiderhelg", rel: "fixtures/tankestrom/speiderhelg.txt" },
   { id: "turnstevne", rel: "fixtures/tankestrom/turnstevne.txt" },
+  { id: "spond_lagtrening_fredag", rel: "fixtures/tankestrom/spond_lagtrening_fredag.txt" },
+  { id: "skole_uke12_foreldre", rel: "fixtures/tankestrom/skole_uke12_foreldre.txt" },
+  { id: "dugnad_foreldremote_juni", rel: "fixtures/tankestrom/dugnad_foreldremote_juni.txt" },
 ];
 
 /** Standard live-eval (lav kostnad): cup-tekster. */

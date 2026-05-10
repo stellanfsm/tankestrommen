@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "category": "school_week",
+  "parentCount": 1,
+  "childCount": 3,
+  "childTitles": [
+    "Skoleuke – melding til foresatte – fredag",
+    "Skoleuke – melding til foresatte – lørdag",
+    "Skoleuke – melding til foresatte – søndag"
+  ],
+  "highlightsByDay": {
+    "fredag": ["12:30 Første kamp"]
+  },
+  "requiredBringItems": [],
+  "forbiddenInNotes": [],
+  "forbiddenHighlights": [],
+  "tentativeDays": {
+    "fredag": false,
+    "lørdag": false,
+    "søndag": false
+  },
+  "timePrecisionByDay": {
+    "fredag": "date_only",
+    "lørdag": "date_only",
+    "søndag": "date_only"
+  },
+  "requiredTasks": []
+}
