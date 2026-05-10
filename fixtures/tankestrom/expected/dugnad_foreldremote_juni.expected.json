@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "category": "parent_meeting_workday",
+  "parentCount": 1,
+  "childCount": 2,
+  "childTitles": [
+    "Foreldregruppa – våravslutning – fredag",
+    "Foreldregruppa – våravslutning – lørdag"
+  ],
+  "highlightsByDay": {
+    "fredag": ["19:00 Tredje kamp", "10:00 Første kamp", "12:00 Andre kamp"],
+    "lørdag": ["10:00 Første kamp", "12:00 Andre kamp", "19:00 Tredje kamp"]
+  },
+  "requiredBringItems": [],
+  "forbiddenInNotes": [],
+  "forbiddenHighlights": [],
+  "tentativeDays": {
+    "fredag": false,
+    "lørdag": false
+  },
+  "timePrecisionByDay": {
+    "fredag": "date_only",
+    "lørdag": "date_only"
+  },
+  "requiredTasks": [
+    {
+      "titleIncludes": "Spond",
+      "date": "2026-06-11",
+      "dueTime": null
+    }
+  ]
+}
