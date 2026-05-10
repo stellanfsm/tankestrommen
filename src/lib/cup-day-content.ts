@@ -743,6 +743,16 @@ export function enrichCupStructuredContentWithResolvedTiming(
 
   const window = enrichment.timeWindow;
   if (window && enrichment.timePrecision === "time_window") {
+    highlights = highlights.map((h) => {
+      const t = normalizeSpace(h);
+      if (!t || /\d{1,2}:\d{2}\s*[-–—\u2212]\s*\d{1,2}:\d{2}/.test(t)) return h;
+      const m = /^(\d{2}:\d{2})\s+(.+)$/.exec(t);
+      if (!m) return h;
+      if (m[1] !== window.earliestStart) return h;
+      if (/^oppm[oø]te\b/i.test((m[2] ?? "").trim())) return h;
+      return `${window.earliestStart}–${window.latestStart} ${(m[2] ?? "").trim()}`;
+    });
+
     const label = inferTimeWindowActivityLabel(blob);
     const line = buildTimeWindowHighlightLine({
       earliest: window.earliestStart,

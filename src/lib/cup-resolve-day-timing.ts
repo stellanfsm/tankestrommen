@@ -15,6 +15,10 @@ function normalizeNorwegianLetters(input: string): string {
     .replace(/æ/g, "e");
 }
 
+function normalizeSpace(input: string): string {
+  return input.replace(/\s+/g, " ").trim();
+}
+
 export function extractAttendanceTimeFromDay(day: DayScheduleEntry): string | null {
   const pool = [day.time ?? "", day.details ?? "", ...day.highlights, ...day.notes].join("\n");
   const fromPhrases = extractExplicitAttendanceHhmmTimes(pool);
@@ -156,6 +160,54 @@ function parseCupTimeWindowForScheduleDay(
   return tw;
 }
 
+/**
+ * `resolveNonFlightEventTimes` plukker opp «mellom kl. … og …» fra hele dagens blob.
+ * På fredag/lørdag kan en søndagskamp-vindu-linje (deles på tvers av dager) feilaktig
+ * gi sluttid / time_window i cup-stien — fjern kun slike linjer fra konteksten til non-flight-resolve.
+ */
+function stripSundayPlayoffClockWindowLinesForNonFlight(blob: string, dayLabel: string | null): string {
+  const key = cupWeekdayKeyFromDayLabel(dayLabel);
+  if (!key || key === "sondag") return blob;
+  const lines = blob.split(/\r?\n/);
+  const kept = lines.filter((raw) => {
+    const line = raw.trim();
+    if (!line) return true;
+    const n = normalizeNorwegianLetters(line);
+    const isSundayPlayoffWindowLine =
+      /\bmellom\b/.test(n) &&
+      /\b(sondagskamp|kamp\s+p[aå]\s+sondag)\b/.test(n) &&
+      /\d{1,2}[.:]\d{2}/.test(line);
+    return !isSundayPlayoffWindowLine;
+  });
+  return kept.join("\n");
+}
+
+/** Linje som inneholder «mellom kl. … og …» (samme som parseCupTimeWindow forventer). */
+function findMellomClockWindowLine(blob: string): string | null {
+  for (const raw of blob.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (
+      /\bmellom\s+(?:kl\.?\s*)?\d{1,2}[.:]\d{2}\s+og\s+(?:kl\.?\s*)?\d{1,2}[.:]\d{2}\b/i.test(
+        line,
+      )
+    )
+      return line;
+  }
+  return null;
+}
+
+/**
+ * Tentativ cup-«mellom»-vindu (null start/slutt) skal bare brukes når vinduet er kamp-/cup-ankret
+ * på samme linje — ellers faller vi til non-flight-resolve (f.eks. dugnad mellom kl. 10 og 12).
+ */
+function mellomWindowLineLooksCupOriented(mellomLine: string): boolean {
+  const n = normalizeNorwegianLetters(mellomLine);
+  return /\b(kamp|kampstart|forste\s+kamp|første\s+kamp|andre\s+kamp|sluttspill|sondagskamp|spill\b|avkast)\b/.test(
+    n,
+  );
+}
+
 export function resolveCupDayTiming(input: {
   day: DayScheduleEntry;
   detailsForEvent: string | null;
@@ -164,7 +216,10 @@ export function resolveCupDayTiming(input: {
   rememberForEvent: string[];
   deadlinesForEvent: string[];
   conditionalDay: boolean;
+  /** Ekstra kontekst (typisk rå/description) når modellen utelater «mellom … og …» i strukturerte felt. */
+  supplementalTimeContextBlob?: string | null;
 }): CupDayTiming {
+  const supplemental = normalizeSpace(input.supplementalTimeContextBlob ?? "");
   const blob = [
     input.day.time ?? "",
     input.detailsForEvent ?? "",
@@ -172,10 +227,17 @@ export function resolveCupDayTiming(input: {
     ...input.notesOnlyForEvent,
     ...input.rememberForEvent,
     ...input.deadlinesForEvent,
+    ...(supplemental ? [supplemental] : []),
   ].join("\n");
 
   const twParsed = parseCupTimeWindowForScheduleDay(blob, input.day.dayLabel);
-  if (twParsed && !input.conditionalDay) {
+  const mellomLine = twParsed ? findMellomClockWindowLine(blob) : null;
+  const useTentativeCupMellomWindow =
+    Boolean(twParsed) &&
+    !input.conditionalDay &&
+    mellomLine != null &&
+    mellomWindowLineLooksCupOriented(mellomLine);
+  if (useTentativeCupMellomWindow && twParsed) {
     return {
       start: null,
       end: null,
@@ -191,7 +253,12 @@ export function resolveCupDayTiming(input: {
     };
   }
 
-  const r = resolveNonFlightEventTimes({ timeField: input.day.time, contextBlob: blob });
+  const nonFlightBlob = stripSundayPlayoffClockWindowLinesForNonFlight(blob, input.day.dayLabel);
+  const r = resolveNonFlightEventTimes({
+    timeField: input.day.time,
+    contextBlob: nonFlightBlob,
+    scheduleDayLabel: input.day.dayLabel,
+  });
   const matchTimes = extractCupMatchTimes(blob);
   const durationMinutes = parseCupMatchDurationMinutes(blob);
   const attendanceOffsetMinutes = parseCupAttendanceOffsetMinutes(blob);
@@ -244,8 +311,35 @@ export function resolveCupDayTiming(input: {
     endTimeSource = "missing_or_unreadable";
   }
 
-  const timePrecision: CupDayTiming["timePrecision"] =
+  let timePrecision: CupDayTiming["timePrecision"] =
     start && end ? "exact" : start ? "start_only" : "date_only";
+  if (!input.conditionalDay && r.timePrecision === "time_window" && start && end) {
+    const startMin = hhmmToMinutesLocal(start);
+    const endMin = hhmmToMinutesLocal(end);
+    const singleMatchAtWindowStart =
+      matchTimes.length === 1 &&
+      matchTimes[0] === start &&
+      endMin != null &&
+      startMin != null &&
+      endMin > startMin;
+    /** «mellom 10 og 12» gir ofte to treff i extractCupMatchTimes — ikke regn dem som to kamper. */
+    const windowBoundary =
+      r.start && r.end ? new Set<string>([r.start, r.end]) : null;
+    const hasKampLikeMatchOutsideWindow =
+      windowBoundary != null && matchTimes.some((t) => !windowBoundary.has(t));
+    if (
+      matchTimes.length === 0 ||
+      singleMatchAtWindowStart ||
+      (matchTimes.length > 0 && !hasKampLikeMatchOutsideWindow)
+    ) {
+      timePrecision = "time_window";
+    }
+  }
+
+  const timeWindowForPortal =
+    timePrecision === "time_window" && start && end
+      ? { earliestStart: start, latestStart: end }
+      : undefined;
 
   return {
     start,
@@ -259,5 +353,6 @@ export function resolveCupDayTiming(input: {
     endTimeSource,
     requiresManualTimeReview: !(start && end),
     ...(timeComputation ? { timeComputation } : {}),
+    ...(timeWindowForPortal ? { timeWindow: timeWindowForPortal } : {}),
   };
 }

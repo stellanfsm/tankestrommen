@@ -33,6 +33,7 @@ import {
   defaultSchoolTimetableEndFromStart,
   extractStartEndFromScheduleTime,
   resolveNonFlightEventTimes,
+  type ResolvedNonFlightTimes,
 } from "@/lib/event-time-resolve";
 import { isUncertainDurationContext, parseDurationMinutes } from "@/lib/parse-duration";
 import { currentSpan, flush, traced } from "braintrust";
@@ -706,6 +707,22 @@ function pickBestDeadlineDateFromTaskLine(line: string, fallbackYear: number): s
 
 function normalizeSpace(input: string): string {
   return input.replace(/\s+/g, " ").trim();
+}
+
+/** Utvid «10:00 Dugnad» til «10:00–12:00 Dugnad» når resolve ga time_window (kun ikke-cup). */
+function enrichNonCupHighlightsWithActivityWindow(
+  highlights: string[],
+  resolved: ResolvedNonFlightTimes,
+): string[] {
+  if (resolved.timePrecision !== "time_window" || !resolved.start || !resolved.end) return highlights;
+  const startEsc = resolved.start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const startRe = new RegExp(`^${startEsc}(?!\\s*[–-])`, "i");
+  return highlights.map((h) => {
+    const t = normalizeSpace(h);
+    if (!t || /\d{1,2}:\d{2}\s*[-–—\u2212]\s*\d{1,2}:\d{2}/.test(t)) return h;
+    if (!startRe.test(t)) return h;
+    return t.replace(startRe, `${resolved.start}–${resolved.end}`);
+  });
 }
 
 function isGenericWeekPlanTitle(title: string): boolean {
@@ -3186,7 +3203,11 @@ function buildCupEmbeddedScheduleSegment(args: {
       ...args.notesOnlyForEvent,
       ...args.deadlinesForEvent,
     ].join("\n");
-    const r = resolveNonFlightEventTimes({ timeField: args.day.time, contextBlob: blob });
+    const r = resolveNonFlightEventTimes({
+      timeField: args.day.time,
+      contextBlob: blob,
+      scheduleDayLabel: args.day.dayLabel ?? args.titleSuffix,
+    });
     if (r.start && r.end) {
       start = r.start;
       end = r.end;
@@ -3850,6 +3871,81 @@ function createPortalWeekDateResolver(result: AIAnalysisResult): (
   };
 }
 
+/** Ekstra kontekst til `resolveNonFlightEventTimes` i portal: modellen utelater ofte vindu-formuleringer i `description`. */
+function mergedTimeContextBlobFromResult(result: AIAnalysisResult): string | null {
+  const d = result.description?.trim() ?? "";
+  const r = result.extractedText?.raw?.trim() ?? "";
+  if (!d && !r) return null;
+  if (d && r && d === r) return d;
+  if (!d) return r;
+  if (!r) return d;
+  return `${d}\n\n${r}`;
+}
+
+const NB_MONTH_NAMES_EXCERPT = [
+  "januar",
+  "februar",
+  "mars",
+  "april",
+  "mai",
+  "juni",
+  "juli",
+  "august",
+  "september",
+  "oktober",
+  "november",
+  "desember",
+] as const;
+
+/** Linjer fra kilde som tydelig gjelder denne dagen (ukedag og/eller dato), for supplement til cup-tidsoppløsning. */
+function excerptSourceLinesForScheduleDay(
+  sourceBlob: string | null | undefined,
+  dayLabel: string | null | undefined,
+  isoDate: string | null,
+): string {
+  const raw = normalizeSpace(sourceBlob ?? "");
+  if (!raw) return "";
+  const label = normalizeNorwegianLetters(dayLabel ?? "").trim();
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const dayPat = label ? new RegExp(`\\b${escaped}\\b`, "i") : null;
+
+  let datePat: RegExp | null = null;
+  let datePatWithYear: RegExp | null = null;
+  if (isoDate && /^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    const [ys, ms, ds] = isoDate.split("-");
+    const d = Number(ds);
+    const m = Number(ms);
+    const y = Number(ys);
+    const monthName = m >= 1 && m <= 12 ? NB_MONTH_NAMES_EXCERPT[m - 1]! : null;
+    if (monthName && Number.isFinite(d) && d > 0) {
+      datePat = new RegExp(`\\b${d}\\.\\s*${monthName}\\b`, "i");
+      if (Number.isFinite(y)) datePatWithYear = new RegExp(`\\b${d}\\.\\s*${monthName}\\s+${y}\\b`, "i");
+    }
+  }
+
+  if (!dayPat && !datePat && !datePatWithYear) return "";
+
+  const isoHit =
+    isoDate && /^\d{4}-\d{2}-\d{2}$/.test(isoDate)
+      ? (line: string) => line.includes(isoDate)
+      : () => false;
+
+  const kept: string[] = [];
+  for (const lineRaw of raw.split(/\r?\n/)) {
+    const line = normalizeSpace(lineRaw);
+    if (!line) continue;
+    const n = normalizeNorwegianLetters(line);
+    if (
+      dayPat?.test(n) ||
+      datePat?.test(n) ||
+      datePatWithYear?.test(line) ||
+      isoHit(line)
+    )
+      kept.push(line);
+  }
+  return kept.join("\n");
+}
+
 async function buildProposalItems(
   result: AIAnalysisResult,
   sourceType: string,
@@ -4073,6 +4169,7 @@ async function buildProposalItems(
       nonFlightResolved = resolveNonFlightEventTimes({
         timeField: time,
         contextBlob: timeResolutionBlob,
+        scheduleDayLabel: titleSuffix,
       });
       start = nonFlightResolved.start;
       end = nonFlightResolved.end;
@@ -4247,12 +4344,7 @@ async function buildProposalItems(
             ...(nonFlightResolved.requiresManualTimeReview && !nonFlightResolved.end
               ? { displayTimeLabel: "Sluttid ikke oppgitt" }
               : {}),
-            timePrecision:
-              nonFlightResolved.start && nonFlightResolved.end
-                ? ("exact" as const)
-                : nonFlightResolved.start
-                  ? ("start_only" as const)
-                  : ("date_only" as const),
+            timePrecision: nonFlightResolved.timePrecision,
             requiresManualTimeReview: nonFlightResolved.requiresManualTimeReview,
           }
         : {}),
@@ -4568,6 +4660,11 @@ async function buildProposalItems(
       }
 
       if (cupLike) {
+        const cupTimingSupplement = excerptSourceLinesForScheduleDay(
+          mergedTimeContextBlobFromResult(result),
+          day.dayLabel,
+          isoDate,
+        );
         cupTiming = resolveCupDayTiming({
           day,
           detailsForEvent,
@@ -4576,6 +4673,7 @@ async function buildProposalItems(
           rememberForEvent: fRemember,
           deadlinesForEvent,
           conditionalDay,
+          supplementalTimeContextBlob: cupTimingSupplement || undefined,
         });
         if (structuredDayContent && cupTiming) {
           const parentTitleForTiming = buildCupParentCalendarTitle(result);
@@ -4702,6 +4800,27 @@ async function buildProposalItems(
         fRemember.length > 0 ||
         hasNonTaskNote;
 
+      const nonCupWindowBlob = [
+        day.time ?? "",
+        detailsForEvent ?? "",
+        ...highlightsForEventFinal,
+        ...notesOnlyForEvent,
+        ...rememberForEvent,
+        ...day.deadlines,
+        result.description ?? "",
+        result.extractedText?.raw ?? "",
+      ].join("\n");
+      const highlightsForPortal = !cupLike
+        ? enrichNonCupHighlightsWithActivityWindow(
+            highlightsForEventFinal,
+            resolveNonFlightEventTimes({
+              timeField: day.time,
+              contextBlob: nonCupWindowBlob,
+              scheduleDayLabel: titleSuffix,
+            }),
+          )
+        : highlightsForEventFinal;
+
       if (hasEventSignal || taskTexts.length === 0) {
         const schoolCtx = buildEventSchoolContext(
           day,
@@ -4737,7 +4856,7 @@ async function buildProposalItems(
               rawNotesBeforeCleanup,
               finalNotes: notesOnlyForEvent,
               rawHighlightsBeforeCleanup,
-              finalHighlights: highlightsForEventFinal,
+              finalHighlights: highlightsForPortal,
               bringItems: rememberForEvent,
               logisticsNotes: structuredDayContent?.logisticsNotes,
               parentTasks: structuredDayContent?.parentTasks,
@@ -4773,7 +4892,7 @@ async function buildProposalItems(
             rememberItems: rememberForEvent,
             deadlines: deadlinesForEvent,
             notes: notesForCtx,
-            highlights: highlightsForEventFinal,
+            highlights: highlightsForPortal,
           },
           schoolCtx,
           dayOverride,
@@ -4781,7 +4900,7 @@ async function buildProposalItems(
           cupDbg,
           cupTiming,
           null,
-          result.description ?? null,
+          mergedTimeContextBlobFromResult(result),
         );
         if (cupLike && structuredDayContent) {
           ev.event.notes = formatCupEventNotesFlat(structuredDayContent) ?? undefined;
@@ -5243,7 +5362,7 @@ async function buildProposalItems(
             null,
             null,
             null,
-            result.description ?? null,
+            mergedTimeContextBlobFromResult(result),
           ),
         );
       }
