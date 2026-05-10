@@ -25,4 +25,9 @@ describe("parseDurationMinutes", () => {
     expect(parseDurationMinutes("det kan ta litt tid")).toBeNull();
     expect(isUncertainDurationContext("det kan ta litt tid")).toBe(true);
   });
+
+  it("«ca.» uten ordgrense etter punktum → usikker kontekst (unngår feil sluttid)", () => {
+    expect(isUncertainDurationContext("Valgfritt foreldremøte (ca. 45 minutter).")).toBe(true);
+    expect(parseDurationMinutes("Valgfritt foreldremøte (ca. 45 minutter).")).toBeNull();
+  });
 });
