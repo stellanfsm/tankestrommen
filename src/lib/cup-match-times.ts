@@ -110,6 +110,13 @@ export function extractCupMatchTimes(text: string): string[] {
   for (const lineRaw of lines) {
     const line = normalizeSpace(lineRaw);
     if (!line || lineLooksLikeAdministrativeDeadline(line)) continue;
+    if (/^(?:kl\.?\s*)?\d{1,2}[.:]\d{2}$/i.test(line)) continue;
+    const nLine = normalizeNorwegianLetters(line);
+    if (
+      /\bdugnad\b/.test(nLine) &&
+      !/\b(kamp(?:start)?|forste\s+kamp|første\s+kamp|andre\s+kamp)\b/.test(nLine)
+    )
+      continue;
     let m: RegExpExecArray | null;
     while ((m = re.exec(line)) !== null) {
       if (contextSuggestsAttendanceForTime(line, m.index, m[0].length)) continue;

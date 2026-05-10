@@ -21,4 +21,11 @@ describe("cup-match-times (portal timing)", () => {
     expect(extractCupMatchTimes("Avkast kl. 18:40 på banen 1.")).toEqual(["18:40"]);
     expect(extractCupMatchTimes("Lagene starter 18:40.")).toEqual(["18:40"]);
   });
+
+  it("tar ikke med klokkeslett på ren dugnad-linje (cup-sti skal ikke tvinge exact over time_window)", () => {
+    expect(extractCupMatchTimes("10:00 Dugnad på klubbhuset")).toEqual([]);
+    expect(extractCupMatchTimes(["09:15 Første kamp", "10:00 Dugnad"].join("\n"))).toEqual([
+      "09:15",
+    ]);
+  });
 });

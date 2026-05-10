@@ -2253,6 +2253,40 @@ function runRoutedImageAnalysis(
   );
 }
 
+function ensureTextAnalysisSourceExcerpt(result: AIAnalysisResult, sourceText: string): AIAnalysisResult {
+  const src = sourceText.trim();
+  if (!src) return result;
+  const rawExisting = result.extractedText?.raw?.trim() ?? "";
+  const windowCue =
+    /\bmellom\b|\d{1,2}[.:]\d{2}\s+til\s+(?:kl\.?\s*)?\d{1,2}[.:]\d{2}/i.test(src);
+  const softDurationCue = /\bvalgfritt\b|\bca\.\s*\d|\bcirka\b/i.test(src);
+  const needsSourceForTimeSemantics =
+    (windowCue &&
+      !/\bmellom\b|\d{1,2}[.:]\d{2}\s+til\s+(?:kl\.?\s*)?\d{1,2}[.:]\d{2}/i.test(rawExisting)) ||
+    (softDurationCue && !/\bvalgfritt\b|\bca\.\s*\d|\bcirka\b/i.test(rawExisting));
+
+  if (!rawExisting) {
+    return {
+      ...result,
+      extractedText: {
+        raw: src,
+        language: result.extractedText?.language ?? "no",
+        confidence: result.extractedText?.confidence ?? 0,
+      },
+    };
+  }
+  if (!needsSourceForTimeSemantics) return result;
+  const raw = rawExisting.includes(src) ? rawExisting : `${rawExisting}\n\n${src}`;
+  return {
+    ...result,
+    extractedText: {
+      raw,
+      language: result.extractedText?.language ?? "no",
+      confidence: result.extractedText?.confidence ?? 0,
+    },
+  };
+}
+
 function runRoutedTextAnalysis(
   text: string,
   input: AnalysisModelRoutingInput,
@@ -2268,7 +2302,10 @@ function runRoutedTextAnalysis(
       inputApproxChars: text.length,
       analysisResponseMode: input.analysisResponseMode ?? "unknown",
     },
-  );
+  ).then(({ result, modelTrace }) => ({
+    result: ensureTextAnalysisSourceExcerpt(result, text),
+    modelTrace,
+  }));
 }
 
 /**

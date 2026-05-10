@@ -88,4 +88,82 @@ describe("resolveCupDayTiming", () => {
     expect(r.timePrecision).toBe("time_window");
     expect(r.timeWindow).toEqual({ earliestStart: "10:00", latestStart: "12:00" });
   });
+
+  it("bevarer time_window når kamptidslista bare gjenspeiler vindu-start (syntetisk «10:00 Kamp»)", () => {
+    const day: DayScheduleEntry = {
+      dayLabel: "lørdag",
+      date: "2026-06-14",
+      time: "10:00",
+      details: "Dugnad på klubbhuset mellom kl. 10:00 og 12:00.",
+      highlights: ["10:00 Kamp"],
+      rememberItems: [],
+      deadlines: [],
+      notes: [],
+    };
+    const r = resolveCupDayTiming({
+      day,
+      detailsForEvent: day.details,
+      highlightsForEventFinal: day.highlights,
+      notesOnlyForEvent: [],
+      rememberForEvent: [],
+      deadlinesForEvent: [],
+      conditionalDay: false,
+    });
+    expect(r.timePrecision).toBe("time_window");
+    expect(r.start).toBe("10:00");
+    expect(r.end).toBe("12:00");
+  });
+
+  it("supplemental kilde: struktur uten mellom, men rå linje med dugnad-vindu → time_window", () => {
+    const day: DayScheduleEntry = {
+      dayLabel: "lørdag",
+      date: "2026-06-14",
+      time: "10:00",
+      details: null,
+      highlights: ["10:00 Dugnad"],
+      rememberItems: [],
+      deadlines: [],
+      notes: [],
+    };
+    const r = resolveCupDayTiming({
+      day,
+      detailsForEvent: day.details,
+      highlightsForEventFinal: day.highlights,
+      notesOnlyForEvent: [],
+      rememberForEvent: [],
+      deadlinesForEvent: [],
+      conditionalDay: false,
+      supplementalTimeContextBlob:
+        "Lørdag 14. juni 2026: Dugnad på klubbhuset mellom kl. 10:00 og 12:00. Oppfordring til alle.",
+    });
+    expect(r.timePrecision).toBe("time_window");
+    expect(r.start).toBe("10:00");
+    expect(r.end).toBe("12:00");
+    expect(r.timeWindow).toEqual({ earliestStart: "10:00", latestStart: "12:00" });
+  });
+
+  it("uten kamp-tider: dugnad «mellom … og …» gir time_window (ikke eksakt cup-intervall)", () => {
+    const day: DayScheduleEntry = {
+      dayLabel: "lørdag",
+      date: "2026-06-14",
+      time: "10:00",
+      details: "Dugnad på klubbhuset mellom kl. 10:00 og 12:00.",
+      highlights: ["10:00 Dugnad"],
+      rememberItems: [],
+      deadlines: [],
+      notes: [],
+    };
+    const r = resolveCupDayTiming({
+      day,
+      detailsForEvent: day.details,
+      highlightsForEventFinal: day.highlights,
+      notesOnlyForEvent: [],
+      rememberForEvent: [],
+      deadlinesForEvent: [],
+      conditionalDay: false,
+    });
+    expect(r.timePrecision).toBe("time_window");
+    expect(r.start).toBe("10:00");
+    expect(r.end).toBe("12:00");
+  });
 });

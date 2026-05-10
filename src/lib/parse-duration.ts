@@ -13,7 +13,10 @@ export function isUncertainDurationContext(text: string): boolean {
   return (
     /\b(kanskje|usikker|litt tid|det kan ta|store deler av dagen|en stund|lenge|varer kanskje|sett av)\b/i.test(
       t,
-    ) || /\b(vet ikke|uvisst|omtrent|cirka|ca\.)\b/i.test(t)
+    ) ||
+    /\b(vet ikke|uvisst|omtrent|cirka)\b/i.test(t) ||
+    /\bca\./i.test(t) ||
+    /\bvalgfritt\b/i.test(t)
   );
 }
 
