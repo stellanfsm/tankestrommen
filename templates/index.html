@@ -63,81 +63,12 @@
       <p id="error-msg" class="text-sm text-red-700"></p>
     </div>
 
-    <!-- Analysis result (read-only) -->
-    <div id="analysis-result" class="hidden w-full rounded-xl border border-gray-200 bg-white p-6">
-      <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Analyse</h2>
-        <span id="confidence-badge" class="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600"></span>
-      </div>
-      <dl id="result-fields" class="mt-4 space-y-3"></dl>
-    </div>
+    <!-- Events container -->
+    <div id="events-container" class="hidden w-full space-y-4"></div>
 
-    <!-- Editable result -->
-    <div id="edit-section" class="hidden w-full rounded-xl border border-gray-200 bg-white p-6">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Rediger resultat</h2>
-      <div class="mt-4 space-y-4">
-
-        <div>
-          <label class="mb-1 block text-xs font-medium text-gray-400">Tittel</label>
-          <input id="edit-title" type="text"
-                 class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition-colors focus:border-gray-500 focus:outline-none" />
-        </div>
-
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-400">Dato</label>
-            <input id="edit-date" type="text"
-                   class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition-colors focus:border-gray-500 focus:outline-none" />
-          </div>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-400">Tidspunkt</label>
-            <input id="edit-time" type="text"
-                   class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition-colors focus:border-gray-500 focus:outline-none" />
-          </div>
-        </div>
-
-        <div>
-          <label class="mb-1 block text-xs font-medium text-gray-400">Sted</label>
-          <input id="edit-location" type="text"
-                 class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition-colors focus:border-gray-500 focus:outline-none" />
-        </div>
-
-        <div>
-          <label class="mb-1 block text-xs font-medium text-gray-400">Type</label>
-          <select id="edit-category"
-                  class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition-colors focus:border-gray-500 focus:outline-none">
-            <option value="arrangement">Arrangement</option>
-            <option value="frist">Frist</option>
-            <option value="beskjed">Beskjed</option>
-            <option value="trening">Trening</option>
-            <option value="møte">Møte</option>
-            <option value="annet">Annet</option>
-          </select>
-        </div>
-
-        <div>
-          <label class="mb-1 block text-xs font-medium text-gray-400">Gjelder</label>
-          <input id="edit-targetGroup" type="text"
-                 class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition-colors focus:border-gray-500 focus:outline-none" />
-        </div>
-
-        <div>
-          <label class="mb-1 block text-xs font-medium text-gray-400">Detaljer</label>
-          <textarea id="edit-description" rows="3"
-                    class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition-colors focus:border-gray-500 focus:outline-none"></textarea>
-        </div>
-      </div>
-
-      <div class="mt-6 flex gap-3">
-        <button id="btn-confirm"
-                class="flex-1 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800">
-          Bekreft
-        </button>
-        <button id="btn-discard"
-                class="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
-          Forkast
-        </button>
-      </div>
+    <!-- Empty state -->
+    <div id="no-events" class="hidden w-full rounded-xl border border-gray-200 bg-white p-6 text-center">
+      <p class="text-sm text-gray-500">Ingen hendelser funnet i bildet.</p>
     </div>
 
     <!-- Confirmed message -->
@@ -163,30 +94,29 @@ const CATEGORY_LABELS = {
 
 const $ = (id) => document.getElementById(id);
 
-const dropArea     = $("drop-area");
-const fileInput    = $("file-input");
-const placeholder  = $("upload-placeholder");
-const previewWrap  = $("upload-preview");
-const previewImg   = $("preview-img");
-const previewInfo  = $("preview-info");
-const loadingEl    = $("loading");
-const errorBox     = $("error-box");
-const errorMsg     = $("error-msg");
-const resultEl     = $("analysis-result");
-const resultFields = $("result-fields");
-const confBadge    = $("confidence-badge");
-const editSection  = $("edit-section");
-const confirmedMsg = $("confirmed-msg");
+const dropArea       = $("drop-area");
+const fileInput      = $("file-input");
+const placeholder    = $("upload-placeholder");
+const previewWrap    = $("upload-preview");
+const previewImg     = $("preview-img");
+const previewInfo    = $("preview-info");
+const loadingEl      = $("loading");
+const errorBox       = $("error-box");
+const errorMsg       = $("error-msg");
+const eventsContainer = $("events-container");
+const noEventsEl     = $("no-events");
+const confirmedMsg   = $("confirmed-msg");
 
 let currentAnalysis = null;
 
-function show(el)  { el.classList.remove("hidden"); }
-function hide(el)  { el.classList.add("hidden"); }
+function show(el) { el.classList.remove("hidden"); }
+function hide(el) { el.classList.add("hidden"); }
 
 function resetUI() {
-  hide(loadingEl); hide(errorBox); hide(resultEl); hide(editSection); hide(confirmedMsg);
+  hide(loadingEl); hide(errorBox); hide(eventsContainer); hide(noEventsEl); hide(confirmedMsg);
   hide(previewWrap); show(placeholder);
   previewImg.src = "";
+  eventsContainer.innerHTML = "";
   currentAnalysis = null;
   dropArea.classList.remove("opacity-60", "cursor-not-allowed", "pointer-events-none");
 }
@@ -208,43 +138,97 @@ function showPreview(file) {
   previewWrap.classList.add("flex");
 }
 
-function renderAnalysis(data) {
-  confBadge.textContent = `${Math.round(data.confidence * 100)}% sikkerhet`;
+function confidenceColor(confidence) {
+  if (confidence >= 0.7) return "bg-green-100 text-green-700";
+  if (confidence >= 0.4) return "bg-yellow-100 text-yellow-700";
+  return "bg-red-100 text-red-700";
+}
+
+function formatTime(startTime, endTime) {
+  if (!startTime && !endTime) return null;
+  if (startTime && endTime) return `${startTime} – ${endTime}`;
+  return startTime || endTime;
+}
+
+function renderEventCard(event, index) {
+  const conf = event.confidence ?? 0;
+  const confPct = Math.round(conf * 100);
+  const confClass = confidenceColor(conf);
+
+  const timeStr = formatTime(event.startTime, event.endTime);
 
   const fields = [
-    { label: "Tittel",     value: data.title },
-    { label: "Dato",       value: data.date },
-    { label: "Tidspunkt",  value: data.time },
-    { label: "Sted",       value: data.location },
-    { label: "Type",       value: CATEGORY_LABELS[data.category] || data.category },
-    { label: "Gjelder",    value: data.targetGroup },
-    { label: "Detaljer",   value: data.description },
+    { label: "Dato", value: event.date },
+    { label: "Tidspunkt", value: timeStr },
+    { label: "Oppmøte", value: event.attendanceTime },
+    { label: "Sted", value: event.location },
+    { label: "Type", value: CATEGORY_LABELS[event.category] || event.category },
+    { label: "Gjelder", value: event.targetGroup },
+    { label: "Detaljer", value: event.description },
   ];
 
-  resultFields.innerHTML = fields
+  const fieldsHtml = fields
     .filter((f) => f.value)
     .map((f) => `<div><dt class="text-xs font-medium text-gray-400">${f.label}</dt><dd class="text-gray-900">${f.value}</dd></div>`)
     .join("");
 
-  show(resultEl);
+  const tentativeBadge = event.isTentative
+    ? `<span class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700" title="${event.tentativeReason || "Usikker"}">Foreløpig</span>`
+    : "";
+
+  const reviewBadge = event.requiresManualReview
+    ? `<span class="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">Sjekk manuelt</span>`
+    : "";
+
+  const bringHtml = event.bringItems && event.bringItems.length > 0
+    ? `<div class="mt-3 rounded-lg bg-blue-50 px-3 py-2">
+         <p class="text-xs font-medium text-blue-600">Ta med</p>
+         <p class="text-sm text-blue-800">${event.bringItems.join(", ")}</p>
+       </div>`
+    : "";
+
+  const highlightsHtml = event.highlights && event.highlights.length > 0
+    ? `<div class="mt-2 rounded-lg bg-purple-50 px-3 py-2">
+         <p class="text-xs font-medium text-purple-600">Viktig</p>
+         <ul class="text-sm text-purple-800">${event.highlights.map(h => `<li>• ${h}</li>`).join("")}</ul>
+       </div>`
+    : "";
+
+  return `
+    <div class="rounded-xl border border-gray-200 bg-white p-6 transition-shadow hover:shadow-md">
+      <div class="flex items-start justify-between gap-3">
+        <h3 class="text-lg font-semibold text-gray-900">${event.title || "Uten tittel"}</h3>
+        <div class="flex shrink-0 items-center gap-2">
+          ${tentativeBadge}
+          ${reviewBadge}
+          <span class="rounded-full ${confClass} px-2.5 py-0.5 text-xs font-medium">${confPct}%</span>
+        </div>
+      </div>
+      <dl class="mt-4 space-y-2">${fieldsHtml}</dl>
+      ${bringHtml}
+      ${highlightsHtml}
+    </div>
+  `;
 }
 
-function populateEditForm(data) {
-  $("edit-title").value       = data.title || "";
-  $("edit-date").value        = data.date || "";
-  $("edit-time").value        = data.time || "";
-  $("edit-location").value    = data.location || "";
-  $("edit-category").value    = data.category || "annet";
-  $("edit-targetGroup").value = data.targetGroup || "";
-  $("edit-description").value = data.description || "";
-  show(editSection);
+function renderEvents(data) {
+  const events = data.events || [];
+
+  if (events.length === 0) {
+    show(noEventsEl);
+    return;
+  }
+
+  eventsContainer.innerHTML = events.map(renderEventCard).join("");
+  show(eventsContainer);
 }
 
 async function handleFile(file) {
   if (!file) return;
 
   showPreview(file);
-  hide(errorBox); hide(resultEl); hide(editSection); hide(confirmedMsg);
+  hide(errorBox); hide(eventsContainer); hide(noEventsEl); hide(confirmedMsg);
+  eventsContainer.innerHTML = "";
   show(loadingEl);
   dropArea.classList.add("opacity-60", "cursor-not-allowed", "pointer-events-none");
 
@@ -262,8 +246,7 @@ async function handleFile(file) {
     }
 
     currentAnalysis = await res.json();
-    renderAnalysis(currentAnalysis);
-    populateEditForm(currentAnalysis);
+    renderEvents(currentAnalysis);
   } catch (e) {
     errorMsg.textContent = e.message || "Noe uventet gikk galt";
     show(errorBox);
@@ -278,12 +261,6 @@ dropArea.addEventListener("dragover", (e) => e.preventDefault());
 dropArea.addEventListener("drop", (e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); });
 fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
 
-$("btn-confirm").addEventListener("click", () => {
-  hide(resultEl); hide(editSection);
-  show(confirmedMsg);
-});
-
-$("btn-discard").addEventListener("click", resetUI);
 $("btn-new").addEventListener("click", () => { resetUI(); fileInput.value = ""; });
 </script>
 
