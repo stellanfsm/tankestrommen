@@ -141,8 +141,10 @@ def normalize_result(data: dict) -> dict:
     if not isinstance(data, dict):
         raise ValueError("Ugyldig JSON fra modellen")
 
-    raw_events = data.get("events", [])
-    if not isinstance(raw_events, list):
+    raw_events = data.get("events")
+    if raw_events is None:
+        raw_events = [data]
+    elif not isinstance(raw_events, list):
         raw_events = [data]
 
     events = []
