@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "category": "activity",
+  "parentCount": 1,
+  "childCount": 3,
+  "childTitles": [
+    "Speiderhelg høst 2026 – fredag",
+    "Speiderhelg høst 2026 – lørdag",
+    "Speiderhelg høst 2026 – søndag"
+  ],
+  "highlightsByDay": {},
+  "requiredBringItems": [],
+  "forbiddenInNotes": [],
+  "forbiddenHighlights": [],
+  "tentativeDays": {
+    "fredag": false,
+    "lørdag": false,
+    "søndag": false
+  },
+  "timePrecisionByDay": {
+    "fredag": "start_only",
+    "lørdag": "start_only",
+    "søndag": "start_only"
+  },
+  "requiredTasks": []
+}

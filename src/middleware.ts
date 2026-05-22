@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "https://olivedrab-ant-122520.hostingersite.com",
 ];
 
 function allowedOrigins(): Set<string> {
@@ -29,6 +30,14 @@ function applyCors(request: NextRequest, response: NextResponse): NextResponse {
 }
 
 export function middleware(request: NextRequest) {
+  if (request.nextUrl.pathname === "/api/analyze") {
+    console.log("[middleware] /api/analyze pass-through", {
+      method: request.method,
+      origin: request.headers.get("origin"),
+    });
+    // La analyze-route håndtere CORS selv (OPTIONS + POST).
+    return NextResponse.next();
+  }
   if (request.method === "OPTIONS") {
     const res = new NextResponse(null, { status: 204 });
     return applyCors(request, res);
