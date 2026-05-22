@@ -63,7 +63,7 @@ VIKTIG dato-regel for ukeplaner:
 - Ved norsk tekst, formater dato som: "mandag 27. mars 2023".
 
 Svar med ETT JSON-objekt (ingen markdown-kodeblokker) med nøyaktig disse nøklene:
-- title: kort tittel på norsk (string)
+- title: kun selve hendelsens eller aktivitetens navn på norsk (string). Bruk aldri dokumentoverskriften, skolenavnet eller avsendernavnet som tittel. Hvis dokumentet har en generisk overskrift som «Informasjon til foreldre» eller «Brev fra skolen» og beskriver én eller flere konkrete hendelser, skal title være hendelsens eget navn (f.eks. «Skolekonsert», «Foreldrekaffe», «Svømmetur»), ikke dokumentoverskriften.
 - schedule: en LISTE med tidspunkter. Hvert element er et objekt med:
   - date: dato som tekst (f.eks. "fredag 10. april 2025"), eller null hvis ukjent (string | null)
   - time: klokkeslett eller tidsrom (f.eks. "15:00" eller "15:00–17:00"), eller null hvis ukjent (string | null)
@@ -1944,6 +1944,7 @@ Rules:
 23. Sports tournaments / Spond messages: put Spond reply deadlines in "deadlines". Put parent volunteer help (fruit, meeting point, equipment), payment/contribution with a due date, and "notify about medicine" as short separate bullets in "rememberItems", "deadlines", or "highlights" (one bullet per action)—not only inside long "notes" paragraphs.
 24. If a day or match depends on progressing (e.g. "if we advance", "time TBD", "published later"), state that clearly in "notes" or "highlights" for that day—do not imply the time is final.
 25. For the same cup weekend: put information that applies to every day (packing, weather, general venue rules) once in "generalImportantInfo" or repeat the exact same short bullet only if needed; put day-specific kickoff/meeting times and opponents in that day's "highlights" or "time".
+26. For "title": use only the specific event or activity name — never the document heading, school name, or sender. If the document has a generic heading like "Informasjon til foreldre" or "Brev fra skolen" and describes one or more concrete events, set "title" to the event's own name (e.g. "Skolekonsert", "Foreldrekaffe") — not the document heading.
 
 Return this JSON shape:
 
