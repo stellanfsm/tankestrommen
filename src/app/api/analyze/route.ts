@@ -834,6 +834,7 @@ function buildCalendarEventTitle(
 
   const GENERIC_DOCUMENT_HEADING_RE =
     /^(informasjon til foreldre|brev til foreldre|beskjed til foreldre|melding til foreldre|informasjon fra \w+|brev fra \w+)(\s+fra\s+\S+)?/i;
+  console.log("[buildCalendarEventTitle] baseTitle:", baseTitle, "| suffix:", suffix);
   if (GENERIC_DOCUMENT_HEADING_RE.test(baseTitle)) return suffix;
 
   if (isGenericWeekPlanTitle(baseTitle)) {
