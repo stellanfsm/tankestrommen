@@ -75,7 +75,7 @@ Svar med ETT JSON-objekt (ingen markdown-kodeblokker) med nøyaktig disse nøkle
   - Hvis bare dato er kjent (ikke tid): sett time til null.
   - Hvis bare tid er kjent (ikke dato): sett date til null.
 - location: sted hvis funnet, ellers null (string | null)
-- description: kort oppsummering på norsk (string)
+- description: kort oppsummering på norsk som kun gjelder denne spesifikke hendelsen (string). Ta kun med informasjon som hører til akkurat denne hendelsen: sted, pris, hva som trengs, spesielle instruksjoner. Aldri skriv et sammendrag som oppsummerer alle hendelsene i dokumentet samlet. Har dokumentet tre hendelser, får hver hendelse sin egen spesifikke description, ikke et felles sammendrag.
 - category: én av: arrangement, frist, beskjed, trening, møte, annet
 - targetGroup: hvem det gjelder (f.eks. klasse, lag, foreldre), ellers null (string | null)
 - organizer: arrangør eller avsender (f.eks. skole, klubb, organisasjon), ellers null (string | null)
@@ -1945,6 +1945,7 @@ Rules:
 24. If a day or match depends on progressing (e.g. "if we advance", "time TBD", "published later"), state that clearly in "notes" or "highlights" for that day—do not imply the time is final.
 25. For the same cup weekend: put information that applies to every day (packing, weather, general venue rules) once in "generalImportantInfo" or repeat the exact same short bullet only if needed; put day-specific kickoff/meeting times and opponents in that day's "highlights" or "time".
 26. For "title": use only the specific event or activity name — never the document heading, school name, or sender. If the document has a generic heading like "Informasjon til foreldre" or "Brev fra skolen" and describes one or more concrete events, set "title" to the event's own name (e.g. "Skolekonsert", "Foreldrekaffe") — not the document heading.
+27. For "notes" within each day/event entry: include only information specific to that exact event — location, price, what to bring, special instructions. Never write a document-level summary that describes all events together. If the document contains 3 events, each event entry gets its own specific notes, not a shared summary.
 
 Return this JSON shape:
 
