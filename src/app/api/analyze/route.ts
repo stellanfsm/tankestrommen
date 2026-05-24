@@ -843,7 +843,6 @@ function buildCalendarEventTitle(
     return baseTitle || "Hendelse";
   }
 
-  console.log("[buildCalendarEventTitle] baseTitle:", baseTitle, "| suffix:", suffix);
   if (GENERIC_DOCUMENT_HEADING_RE.test(baseTitle)) return suffix;
 
   if (isGenericWeekPlanTitle(baseTitle)) {
@@ -4267,7 +4266,6 @@ async function buildProposalItems(
         : null;
     const eventTitleRaw =
       tf?.proposedTitle ?? buildEventProposalTitle(result, titleSuffix, dayContext);
-    console.log("[eventTitleRaw]", eventTitleRaw);
     const eventTitle =
       !tf && cupProposalDebug
         ? cupProposalDebug.embeddedScheduleParentMergeRestored
