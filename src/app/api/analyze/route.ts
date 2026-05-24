@@ -4255,6 +4255,7 @@ async function buildProposalItems(
         : null;
     const eventTitleRaw =
       tf?.proposedTitle ?? buildEventProposalTitle(result, titleSuffix, dayContext);
+    console.log("[eventTitleRaw]", eventTitleRaw);
     const eventTitle =
       !tf && cupProposalDebug
         ? cupProposalDebug.embeddedScheduleParentMergeRestored
