@@ -68,6 +68,7 @@ Svar med ETT JSON-objekt (ingen markdown-kodeblokker) med nøyaktig disse nøkle
   - date: dato som tekst (f.eks. "fredag 10. april 2025"), eller null hvis ukjent (string | null)
   - time: klokkeslett eller tidsrom (f.eks. "15:00" eller "15:00–17:00"), eller null hvis ukjent (string | null)
   - label: valgfri kort beskrivelse av denne dagen (f.eks. "Dag 1", "Fredag"), eller null (string | null)
+  - notes: hendelsesspesifikke detaljer kun for dette tidspunktet (sted, pris, hva som trengs, spesielle instruksjoner), eller null (string | null). Aldri et dokumentsammendrag. Eksempel for en Skolekonsert-oppføring: "Auditoriet, 3. etasje. Husk å ta med programheftet."
   VIKTIGE REGLER for schedule:
   - Hvis arrangementet skjer på ÉN dag med ETT tidspunkt: bruk én oppføring.
   - Hvis arrangementet går over FLERE dager eller har ULIKE tidspunkter på forskjellige dager: bruk ÉN oppføring PER dag/tidspunkt. IKKE slå sammen til ett tidsrom.
@@ -1669,6 +1670,7 @@ function normalizeTimeSlot(raw: unknown): TimeSlot {
     date: typeof o.date === "string" && o.date.trim() ? o.date.trim() : null,
     time: typeof o.time === "string" && o.time.trim() ? o.time.trim() : null,
     label: typeof o.label === "string" && o.label.trim() ? o.label.trim() : null,
+    notes: typeof o.notes === "string" && o.notes.trim() ? o.notes.trim() : null,
   };
 }
 

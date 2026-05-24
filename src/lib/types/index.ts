@@ -23,6 +23,7 @@ export interface TimeSlot {
   date: string | null;
   time: string | null;
   label: string | null;
+  notes?: string | null;
 }
 
 /** Per dag når innholdet er ukeplan, flerdagers plan eller lignende. Tom = ikke brukt. */

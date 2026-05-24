@@ -4122,9 +4122,10 @@ async function buildProposalItems(
       notes: string[];
       highlights: string[];
     },
+    slotNotes?: string | null,
   ): string | null => {
     if (!dayContext) {
-      return noteBase ?? result.description;
+      return noteBase ?? slotNotes ?? result.description;
     }
 
     const sections: string[] = [];
@@ -4197,6 +4198,8 @@ async function buildProposalItems(
     arrangementEndDateIso?: string | null,
     /** Ekstra fritekst for varighets-/tids-parsing (f.eks. result.description). */
     timeContextBlob?: string | null,
+    /** Per-oppførings-spesifikke detaljer fra schedule[i].notes. */
+    slotNotes?: string | null,
   ): PortalEventItem => {
     const timeResolutionBlob = buildTimeContextBlob(notes, dayContext, timeContextBlob ?? null);
     const travelHere =
@@ -4326,7 +4329,7 @@ async function buildProposalItems(
     };
     const n = cupProposalDebug?.flatCupNotesPreferred
       ? null
-      : buildStructuredNotes(notes, dayContext);
+      : buildStructuredNotes(notes, dayContext, slotNotes);
     if (n) item.event.notes = n;
     if (
       !tf &&
@@ -5421,6 +5424,7 @@ async function buildProposalItems(
             null,
             null,
             mergedTimeContextBlobFromResult(result),
+            slot.notes ?? undefined,
           ),
         );
       }
