@@ -4125,7 +4125,7 @@ async function buildProposalItems(
     slotNotes?: string | null,
   ): string | null => {
     if (!dayContext) {
-      return noteBase ?? slotNotes ?? result.description;
+      return noteBase ?? slotNotes ?? null;
     }
 
     const sections: string[] = [];
