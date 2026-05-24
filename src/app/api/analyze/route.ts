@@ -830,10 +830,19 @@ function buildCalendarEventTitle(
   const suffix = normalizeSpace(titleSuffix || "").trim();
   const targetGroup = normalizeSpace(result.targetGroup || "").trim();
 
-  if (!suffix) return baseTitle || "Hendelse";
-
   const GENERIC_DOCUMENT_HEADING_RE =
     /^(informasjon til foreldre|brev til foreldre|beskjed til foreldre|melding til foreldre|informasjon til foreldre fra [\w\s]+|informasjon fra [\w\s]+|brev fra [\w\s]+)(\s+fra\s+\S+)?/i;
+
+  if (!suffix) {
+    const separatorMatch = baseTitle.match(/^(.+?)\s*[–-]\s*(.+)$/);
+    if (separatorMatch) {
+      const before = separatorMatch[1].trim();
+      const after = separatorMatch[2].trim();
+      if (GENERIC_DOCUMENT_HEADING_RE.test(before)) return after;
+    }
+    return baseTitle || "Hendelse";
+  }
+
   console.log("[buildCalendarEventTitle] baseTitle:", baseTitle, "| suffix:", suffix);
   if (GENERIC_DOCUMENT_HEADING_RE.test(baseTitle)) return suffix;
 
