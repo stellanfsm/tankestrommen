@@ -87,7 +87,12 @@ Bruk "event" når innholdet har et definert tidsvindu (dato + eventuelt klokkesl
 }
 
 ─── GJØREMÅL (kind="task") ───
-Bruk "task" når innholdet er en handling/frist som må gjøres, men som ikke er en tidsblokkert hendelse.
+Bruk "task" når innholdet er en handling/frist som må gjøres, men som ikke er en tidsblokkert hendelse. Typiske task-triggere:
+- Betalingsfrister: «betales innen», «pris:», beløp + frist (f.eks. «50 kr til kontaktlærer innen 6. juni»)
+- Samtykkeskjema / tillatelse: «skriv under», «svar innen», «bekreft påmelding», «foresatte må godkjenne»
+- Svar til arrangør: «meld på innen», «gi beskjed om», «registrer på»
+- Andre foreldrehandlinger som må gjøres FØR arrangementet: bestille, kjøpe, forberede, sende inn
+Hvis et dokument beskriver en hendelse OG har én eller flere slike handlinger, skal hendelsen og hver handling få sitt eget separate item.
 
 {
   "kind": "task",
@@ -109,7 +114,7 @@ Bruk "task" når innholdet er en handling/frist som må gjøres, men som ikke er
 2. title skal være hendelsens spesifikke navn — aldri dokumentoverskriften.
 3. notes skal kun inneholde informasjon som er spesifikk for akkurat den ene hendelsen/oppgaven.
 4. Hvis et dokument beskriver flere hendelser eller gjøremål, lag ett item per hendelse/gjøremål.
-5. Avgjør kind ut fra om elementet har et tidsvindu (event) eller er en handling/frist (task).
+5. Avgjør kind ut fra om elementet har et tidsvindu (event) eller er en handling/frist (task). Betalingsfrister (beløp + frist), samtykkeskjema («skriv under», «svar innen»), påmeldingsfrister og andre foreldrehandlinger som må gjøres før arrangementet er alltid task — selv om de er nevnt i samme avsnitt som en event. Lag ett task-item per distinkt handling.
 6. targetGroup: bruk "barn" når hendelsen/oppgaven direkte involverer et barn — skolearrangementer, klassefester, idrettsaktiviteter, turer, skolekonsert; bruk "foreldre" kun når det eksplisitt er bare for foreldre — foreldremøte, foreldrekaffe, møter der bare foreldre er invitert; bruk "familie" kun når hele familien eksplisitt er invitert sammen; ved tvil om en skole-relatert hendelse, bruk "barn".
 7. transport.needed: sett true hvis dokumentet antyder at barn må leveres/hentes eller at transport er nødvendig.
 8. Dato-regel for ukeplaner: hvis kilden har uke-nummer (f.eks. "Uke 13") og ukedager, beregn eksakt dato med ISO-uke (mandag = dag 1 i uken; uke 1 = uken med årets første torsdag). Bruk årstall fra kilden, eller inneværende år hvis mangler.
