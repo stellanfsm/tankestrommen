@@ -51,91 +51,69 @@ interface ParentDayItem {
 }
 
 const SYSTEM_PROMPT = `Du analyserer bilder av beskjeder, invitasjoner, skjermbilder og dokumenter for norske foreldre.
-Les all synlig tekst. Avgjør om innholdet beskriver et arrangement, en frist, en beskjed, trening, et møte, eller annet.
+Les all synlig tekst og ekstraher alle hendelser og gjøremål.
 
-VIKTIG dato-regel for ukeplaner:
-- Hvis kilden inneholder uke-nummer (f.eks. "Uke 13" eller "Week 42") og ukedager (mandag–søndag / monday–sunday), skal du beregne eksakt kalenderdato per dag med ISO-uke:
-  - Mandag er første dag i uken.
-  - Uke 1 er uken som inneholder årets første torsdag.
-- Finn årstall i kilden hvis mulig.
-- Hvis årstall mangler, bruk inneværende år med mindre konteksten tydelig tilsier annet.
-- Ikke la date stå tom når uke-nummer + ukedag gjør beregning mulig.
-- Ved norsk tekst, formater dato som: "mandag 27. mars 2023".
+Svar med ETT JSON-objekt (ingen markdown-kodeblokker) med nøyaktig dette skjemaet:
 
-Svar med ETT JSON-objekt (ingen markdown-kodeblokker) med nøyaktig disse nøklene:
-- title: kun selve hendelsens eller aktivitetens navn på norsk (string). Bruk aldri dokumentoverskriften, skolenavnet eller avsendernavnet som tittel. Hvis dokumentet har en generisk overskrift som «Informasjon til foreldre» eller «Brev fra skolen» og beskriver én eller flere konkrete hendelser, skal title være hendelsens eget navn (f.eks. «Skolekonsert», «Foreldrekaffe», «Svømmetur»), ikke dokumentoverskriften.
-- schedule: en LISTE med tidspunkter. Hvert element er et objekt med:
-  - date: dato som tekst (f.eks. "fredag 10. april 2025"), eller null hvis ukjent (string | null)
-  - time: klokkeslett eller tidsrom (f.eks. "15:00" eller "15:00–17:00"), eller null hvis ukjent (string | null)
-  - label: valgfri kort beskrivelse av denne dagen (f.eks. "Dag 1", "Fredag"), eller null (string | null)
-  - notes: PÅKREVD felt. Skriv hendelsesspesifikke detaljer kun for DETTE arrangementet: sted/rom, pris, hva som skal tas med, særlige instruksjoner. Hent informasjonen direkte fra kildeteksten. IKKE skriv et dokumentsammendrag. IKKE la feltet være null hvis kilden inneholder relevant informasjon om dette arrangementet. Eksempel for Skolekonsert: "Auditoriet, 3. etasje. Husk å ta med programheftet fra sekken." Eksempel for Klassefest: "Gymsal. Pris: 50 kr per barn, betales til kontaktlærer innen 6. juni." (string | null)
-  VIKTIGE REGLER for schedule:
-  - Hvis arrangementet skjer på ÉN dag med ETT tidspunkt: bruk én oppføring.
-  - Hvis arrangementet går over FLERE dager eller har ULIKE tidspunkter på forskjellige dager: bruk ÉN oppføring PER dag/tidspunkt. IKKE slå sammen til ett tidsrom.
-  - Hvis ingen dato eller tid finnes: bruk en tom liste [].
-  - Hvis bare dato er kjent (ikke tid): sett time til null.
-  - Hvis bare tid er kjent (ikke dato): sett date til null.
-- location: sted hvis funnet, ellers null (string | null)
-- description: kort oppsummering på norsk som kun gjelder denne spesifikke hendelsen (string). Ta kun med informasjon som hører til akkurat denne hendelsen: sted, pris, hva som trengs, spesielle instruksjoner. Aldri skriv et sammendrag som oppsummerer alle hendelsene i dokumentet samlet. Har dokumentet tre hendelser, får hver hendelse sin egen spesifikke description, ikke et felles sammendrag.
-- category: én av: arrangement, frist, beskjed, trening, møte, annet
-- targetGroup: hvem det gjelder (f.eks. klasse, lag, foreldre), ellers null (string | null)
-- organizer: arrangør eller avsender (f.eks. skole, klubb, organisasjon), ellers null (string | null)
-- contactPerson: kontaktperson med navn og evt. telefon/e-post, ellers null (string | null)
-- sourceUrl: lenke/URL til mer info eller påmelding hvis synlig i bildet, ellers null (string | null)
-- scheduleByDay: en LISTE for ukeplaner, aktivitetsplaner over flere dager, turneringer/stevner, leir, cup osv. Hvert element:
-  - dayLabel: ukedag eller merking (f.eks. "Mandag", "Dag 2", "Lørdag"), eller null (string | null)
-  - date: konkret dato hvis synlig, ellers null (string | null)
-  - time: klokkeslett eller tidsrom denne dagen hvis relevant, ellers null (string | null)
-  - details: kort og konkret oppsummering av hva eleven/forelder må vite denne dagen (aktiviteter, lekse, forberedelser, påminnelser/NB, praktiske beskjeder), eller null (string | null)
-  REGLER for scheduleByDay:
-  - Bruk KUN denne listen når innholdet tydelig er fordelt per dag (ukeplan, tabell med mandag–fredag, program per dag, osv.), ELLER flerdagers arrangement der hver dag har egen beskrivelse.
-  - Ved EN enkel hendelse på én eller få dager uten «program per dag»: sett scheduleByDay til tom liste [] og bruk feltet schedule som vanlig.
-  - IKKE finn på detaljer per dag du ikke ser i kilden. Ved tvil: tom scheduleByDay, beskriv heller i description og bruk schedule hvis det passer.
-  - Én rad per dag eller per oppføring i kilden som hører til én dag.
-  - Hvis en dag ikke har stor hendelse, men har meningsfullt skoleinnhold ("I timen", lekse, oppgaver, lesing/skriving, innlevering, forberedelse til prøve/vurdering, NB/påminnelser): fyll details med kort handlingsrettet oppsummering.
-  - Ikke la en ukedag stå tom dersom kilden har meningsfull skoleinformasjon for den dagen.
-- confidence: tall 0–1 for hvor sikker du er på tolkningen (number)
-- extractedText: objekt med:
-  - raw: transkripsjon av relevant tekst fra bildet (string)
-  - language: ISO 639-1 språkkode, typisk "no" (string)
-  - confidence: tall 0–1 for OCR/lesbarhet (number)
-- schoolWeeklyProfile: null ELLER et objekt for FAST UKENTLIG TIMEPLAN (samme fag/timer hver uke, typisk «Timeplan», «Ukeskjema», tabell med klokkeslett + fag mandag–fredag). IKKE bruk dette for A-plan, aktivitetsplan for én bestemt uke, invitasjoner eller endagshendelser – da null.
-  Når schoolWeeklyProfile er utfylt: sett schedule til [] og scheduleByDay til [] (unngå duplikat kalenderdata).
+{
+  "version": "2.0.0",
+  "items": [ ... ]
+}
 
-GRID-TIMEPLAN – LES LAYOUTEN FØR DU TOLKER TEKSTEN:
-  Timeplaner er en 2D-ruter. Du MÅ tolke hver fagboks ut fra HVOR den står visuelt:
-  1) Først finn DAGSKOLONNENE langs toppen: Mandag, Tirsdag, Onsdag, Torsdag, Fredag (stå ALDRI på feil kolonne – om boksen ligger midt mellom to, pek på den dagen boksens senter er innenfor).
-  2) Finn TIDSRADENE langs venstre kolonne. Dette er tidsnavene som hver rad starter/ender på (f.eks. 08:15, 09:00, 09:15, 10:05, 10:45, 11:30, 12:15, 13:00).
-  3) For HVER fagboks: bestem hvilken dag-kolonne (horisontal posisjon) og hvilken tidsrad (vertikal posisjon) den dekker. Fagboksens vertikale høyde avgjør start og slutt. En boks som går over flere rader → lengre time.
-  4) IKKE gjett fag etter rekkefølge i en liste. Rekkefølgen i kildeteksten er ikke pålitelig; KUN visuell plassering gjelder.
-  5) Kryssjekk før du skriver time: "Denne boksen ligger under kolonne X og fra rad Y1 til Y2 → dag=X, start=Y1, slutt=Y2".
-  6) Hvis to bokser står i SAMME slot (samme dag + samme tidsrad) med ulike fag (f.eks. «Matte D1» over, «Norsk D2» under, eller delt boks):
-     - Rapporter det som ÉN lesson for slotten med subjectKey=mest sannsynlige fag for en tilfeldig elev, customLabel=den originale teksten slik den står, og legg alle alternativ i subjectCandidates (se under).
-     - IKKE legg det som to separate lessons for samme elev.
-  7) Pauser som «Lillefri», «Storefri», «Friminutt», «Pause», «Lunsj», «Midttime» er IKKE fag – IKKE ta dem med i lessons.
-  8) Tekst inni boksen kan overstyre raden:
-     - «Begynner 10.05» / «Starter 10:05» → bytt ut start med 10:05.
-     - «varer til 09.45» / «Slutter 09:45» → bytt ut slutt med 09:45.
-     - «30 min» / «45 min» → beregn sluttet ut fra start hvis starten er sikker, ellers bruk raden.
-     - «Etter høstferien» / «Fra uke …» → fortsatt ta med (dette er en fast time), men du kan legge teksten i customLabel.
-  9) Hvis en time bare dekker PART av en rad og tekst bekrefter kortere varighet, tro på teksten først, raden som fallback.
-  10) Når usikker på en spesifikk boks, hopp den over fremfor å gjette feil dag/tid. Hellere en ufullstendig timeplan enn feilplassert fag.
-  11) FAGNAVN INNI BOKSEN:
-     - Kjente kanoniske slugs: norsk, matematikk, engelsk, naturfag, samfunnsfag, krle, kroppsoving, musikk, kunst-og-handverk, mat-og-helse, utdanningsvalg, valgfag, spansk, tysk, fransk, historie, geografi.
-     - IKKE KOPIER fagnavn fra en annen boks på samme dag.
-     - HVIS BOKSEN INNEHOLDER TYDELIG FULLT NAVN: bruk riktig slug + skriv navnet i customLabel (f.eks. subjectKey="kroppsoving", customLabel="Kroppsøving").
-     - HVIS BOKSEN BARE HAR EN FORKORTELSE DU IKKE ER SIKKER PÅ («UTV», «K&H», «K/H», «Språk», «PR», «Sm», etc.): IKKE gjett et kjent fag. Sett subject og subjectKey til forkortelsen akkurat slik den står (f.eks. subject="UTV", subjectKey="UTV"), og customLabel til samme tekst. Serveren vil konvertere det til en trygg fallback-key.
-     - Bedre å beholde rå tekst fra timeplanen enn å gjette feil fag.
+Hvert element i "items" er ENTEN en hendelse (kind="event") ELLER et gjøremål (kind="task").
 
-  Objektet har:
-  - gradeBand: trinn/klasse fritekst (f.eks. «10. trinn», «10B», «VG2») eller null – serveren normaliserer til Foreldre-App-koder
-  - weekdays: objekt med nøkler "0"–"4" (0=mandag … 4=fredag), alternativt man/tir/ons/tor/fre. Lørdag/søndag ikke i skoleprofil-MVP. Hver verdi er ENTEN:
-    - { "useSimpleDay": true, "schoolStart": "HH:MM", "schoolEnd": "HH:MM" } når bare skolestart/-slutt er oppgitt, ELLER
-    - { "useSimpleDay": false, "lessons": [ { "subjectKey": "norsk", "customLabel": null eller tekst, "start": "HH:MM", "end": "HH:MM", "subjectCandidates": [ { "subject": "Matematikk", "subjectKey": "matematikk", "weight": 1 }, { "subject": "Norsk", "subjectKey": "norsk", "weight": 1 } ] }, ... ] }
-  subjectKey: kort slug på norsk fagnavn i små bokstaver og bindestrek (norsk, matematikk, engelsk, naturfag, samfunnsfag, kroppsoving, musikk, kunst_og_håndverk, osv.). Bruk customLabel når faget trenger presisering (f.eks. «Spansk valgfag»). subjectCandidates KUN når samme slot har flere alternative fag/spor – da en rad per alternativ, weight=1 for begge (eller høyere for førstnevnte).
-  Tider: 24-timersformat HH:MM. Sorter lessons innen hver dag etter start tid, stigende.
+─── HENDELSE (kind="event") ───
+Bruk "event" når innholdet har et definert tidsvindu (dato + eventuelt klokkeslett) der noe skjer.
 
-Hvis bildet ikke inneholder lesbar tekst, sett lav confidence og forklar kort i description.`;
+{
+  "kind": "event",
+  "title": "string — kun hendelsens eget navn, aldri dokumentoverskrift",
+  "date": "YYYY-MM-DD",
+  "start": "HH:mm eller null",
+  "end": "HH:mm eller null",
+  "location": "string eller null",
+  "notes": "string — kun info spesifikk for denne hendelsen (sted, pris, hva som trengs). Null hvis ingen spesifikk info.",
+  "personHints": {
+    "names": ["liste med navn nevnt i dokumentet"],
+    "class": "klassetrinn eller null",
+    "school": "skolenavn eller null",
+    "targetGroup": "barn | foreldre | familie | null"
+  },
+  "recurrence": "daily | weekly | monthly | null",
+  "transport": {
+    "needed": true,
+    "hints": ["liste med hint fra dokumentet"]
+  }
+}
+
+─── GJØREMÅL (kind="task") ───
+Bruk "task" når innholdet er en handling/frist som må gjøres, men som ikke er en tidsblokkert hendelse.
+
+{
+  "kind": "task",
+  "title": "string",
+  "date": "YYYY-MM-DD",
+  "dueTime": "HH:mm eller null",
+  "notes": "string eller null",
+  "personHints": {
+    "names": [],
+    "class": null,
+    "school": null,
+    "targetGroup": "barn | foreldre | null"
+  },
+  "taskIntent": "must_do | can_help"
+}
+
+─── REGLER ───
+1. start og end skal ALLTID være HH:mm-format, aldri ISO datetime.
+2. title skal være hendelsens spesifikke navn — aldri dokumentoverskriften.
+3. notes skal kun inneholde informasjon som er spesifikk for akkurat den ene hendelsen/oppgaven.
+4. Hvis et dokument beskriver flere hendelser eller gjøremål, lag ett item per hendelse/gjøremål.
+5. Avgjør kind ut fra om elementet har et tidsvindu (event) eller er en handling/frist (task).
+6. targetGroup: bruk "barn" for skoleaktiviteter rettet mot elever, "foreldre" for foreldremøter o.l., "familie" for aktiviteter der hele familien deltar.
+7. transport.needed: sett true hvis dokumentet antyder at barn må leveres/hentes eller at transport er nødvendig.
+8. Dato-regel for ukeplaner: hvis kilden har uke-nummer (f.eks. "Uke 13") og ukedager, beregn eksakt dato med ISO-uke (mandag = dag 1 i uken; uke 1 = uken med årets første torsdag). Bruk årstall fra kilden, eller inneværende år hvis mangler.
+9. Hvis bildet ikke inneholder lesbar tekst, returner { "version": "2.0.0", "items": [] }.`;
 
 function toDataUrl(image: string): string {
   if (image.startsWith("data:")) return image;
