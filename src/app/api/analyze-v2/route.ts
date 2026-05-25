@@ -81,7 +81,7 @@ Bruk "task" når innholdet er en handling/frist som må gjøres, men som ikke er
 3. notes skal kun inneholde informasjon som er spesifikk for akkurat den ene hendelsen/oppgaven.
 4. Hvis et dokument beskriver flere hendelser eller gjøremål, lag ett item per hendelse/gjøremål.
 5. Avgjør kind ut fra om elementet har et tidsvindu (event) eller er en handling/frist (task).
-6. targetGroup: bruk "barn" for skoleaktiviteter rettet mot elever, "foreldre" for foreldremøter o.l., "familie" for aktiviteter der hele familien deltar.
+6. targetGroup: bruk "barn" når hendelsen/oppgaven direkte involverer et barn — skolearrangementer, klassefester, idrettsaktiviteter, turer, skolekonsert; bruk "foreldre" kun når det eksplisitt er bare for foreldre — foreldremøte, foreldrekaffe, møter der bare foreldre er invitert; bruk "familie" kun når hele familien eksplisitt er invitert sammen; ved tvil om en skole-relatert hendelse, bruk "barn".
 7. transport.needed: sett true hvis dokumentet antyder at barn må leveres/hentes eller at transport er nødvendig.
 8. Dato-regel for ukeplaner: hvis kilden har uke-nummer (f.eks. "Uke 13") og ukedager, beregn eksakt dato med ISO-uke (mandag = dag 1 i uken; uke 1 = uken med årets første torsdag). Bruk årstall fra kilden, eller inneværende år hvis mangler.
 9. Hvis teksten ikke inneholder meningsfull informasjon, returner { "version": "2.0.0", "items": [] }.`;
