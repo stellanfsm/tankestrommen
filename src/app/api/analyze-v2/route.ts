@@ -164,7 +164,7 @@ async function callForImage(imageBase64: string): Promise<unknown> {
       {
         role: "user",
         content: [
-          { type: "text", text: "Analyser bildet og returner JSON som beskrevet." },
+          { type: "text", text: `Dagens dato: ${new Date().toISOString().slice(0, 10)}.\n\nAnalyser bildet og returner JSON som beskrevet.` },
           { type: "image_url", image_url: { url, detail: "high" } },
         ],
       },
@@ -189,7 +189,7 @@ async function callForText(text: string): Promise<unknown> {
       { role: "system", content: TEXT_SYSTEM_PROMPT_V2 },
       {
         role: "user",
-        content: `Analyser følgende tekst og returner JSON som beskrevet:\n\n${text}`,
+        content: `Dagens dato: ${new Date().toISOString().slice(0, 10)}.\n\nAnalyser følgende tekst og returner JSON som beskrevet:\n\n${text}`,
       },
     ],
     response_format: { type: "json_object" },
