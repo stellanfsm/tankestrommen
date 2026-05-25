@@ -118,7 +118,8 @@ Hvis et dokument beskriver en hendelse OG har én eller flere slike handlinger, 
 6. targetGroup: bruk "barn" når hendelsen/oppgaven direkte involverer et barn — skolearrangementer, klassefester, idrettsaktiviteter, turer, skolekonsert; bruk "foreldre" kun når det eksplisitt er bare for foreldre — foreldremøte, foreldrekaffe, møter der bare foreldre er invitert; bruk "familie" kun når hele familien eksplisitt er invitert sammen; ved tvil om en skole-relatert hendelse, bruk "barn".
 7. transport.needed: sett true hvis dokumentet antyder at barn må leveres/hentes eller at transport er nødvendig.
 8. Dato-regel for ukeplaner: hvis kilden har uke-nummer (f.eks. "Uke 13") og ukedager, beregn eksakt dato med ISO-uke (mandag = dag 1 i uken; uke 1 = uken med årets første torsdag). Bruk årstall fra kilden, eller inneværende år hvis mangler.
-9. Hvis bildet ikke inneholder lesbar tekst, returner { "version": "2.0.0", "items": [] }.`;
+9. Hvis bildet ikke inneholder lesbar tekst, returner { "version": "2.0.0", "items": [] }.
+10. «Oppmøte»-tider (møtested/-tid før et arrangement) skal aldri være separate kalenderoppføringer. Bruk oppmøtetiden som start (det er den relevante tiden for foreldre), og beskriv begge tidspunkter i notes. Eksempel: «Oppmøte kl. 09:30, kamp kl. 10:00» → start: "09:30", notes: "Oppmøte 09:30, kamp starter 10:00".`;
 
 function toDataUrl(image: string): string {
   if (image.startsWith("data:")) return image;
