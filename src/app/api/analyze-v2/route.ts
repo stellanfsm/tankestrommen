@@ -6,6 +6,21 @@ import {
   getStrongAnalysisModel,
 } from "@/lib/ai/analysis-model-router";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+function withCors(res: NextResponse): NextResponse {
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.headers.set(k, v));
+  return res;
+}
+
+export function OPTIONS(): NextResponse {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 const TEXT_SYSTEM_PROMPT_V2 = `Du analyserer tekst fra beskjeder, invitasjoner, ukeplaner og dokumenter for norske foreldre.
 Les all teksten og ekstraher alle hendelser og gjøremål.
 
@@ -210,9 +225,11 @@ async function resolveTextFromBody(body: ParsedBody): Promise<string | null> {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!process.env.OPENAI_API_KEY?.trim()) {
-    return NextResponse.json(
-      { error: "Analyse-tjenesten er ikke konfigurert (mangler OPENAI_API_KEY)." },
-      { status: 503 },
+    return withCors(
+      NextResponse.json(
+        { error: "Analyse-tjenesten er ikke konfigurert (mangler OPENAI_API_KEY)." },
+        { status: 503 },
+      ),
     );
   }
 
@@ -222,34 +239,38 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ? await parseMultipartBody(request)
       : ((await request.json()) as ParsedBody);
   } catch {
-    return NextResponse.json({ error: "Ugyldig forespørsel." }, { status: 400 });
+    return withCors(NextResponse.json({ error: "Ugyldig forespørsel." }, { status: 400 }));
   }
 
   try {
     if (body.image && typeof body.image === "string") {
       const result = await callForImage(body.image);
-      return NextResponse.json(result, { status: 200 });
+      return withCors(NextResponse.json(result, { status: 200 }));
     }
 
     const text = await resolveTextFromBody(body);
     if (text) {
       if (text.length > 15_000) {
-        return NextResponse.json(
-          { error: "Teksten er for lang. Maks 15 000 tegn." },
-          { status: 413 },
+        return withCors(
+          NextResponse.json(
+            { error: "Teksten er for lang. Maks 15 000 tegn." },
+            { status: 413 },
+          ),
         );
       }
       const result = await callForText(text);
-      return NextResponse.json(result, { status: 200 });
+      return withCors(NextResponse.json(result, { status: 200 }));
     }
 
-    return NextResponse.json(
-      { error: "Ingen gjenkjennelig input (image, text, pdf eller docx)." },
-      { status: 400 },
+    return withCors(
+      NextResponse.json(
+        { error: "Ingen gjenkjennelig input (image, text, pdf eller docx)." },
+        { status: 400 },
+      ),
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Ukjent feil";
     console.error("[api/analyze-v2]", err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return withCors(NextResponse.json({ error: message }, { status: 500 }));
   }
 }
