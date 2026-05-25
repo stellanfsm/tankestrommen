@@ -110,7 +110,7 @@ Hvis et dokument beskriver en hendelse OG har én eller flere slike handlinger, 
 }
 
 ─── REGLER ───
-1. start og end skal ALLTID være HH:mm-format, aldri ISO datetime.
+1. start og end skal ALLTID være HH:mm-format, aldri ISO datetime. Hvis dokumentet viser et tidsrom (f.eks. «kl. 14:00–17:00», «14:00-17:00», «fra 14 til 17», «14–17»), skal ALLTID både start OG end settes — end skal aldri være null når en sluttid er synlig i dokumentet. Sett end til null kun når ingen sluttid er nevnt overhodet.
 2. title skal være hendelsens spesifikke navn — aldri dokumentoverskriften.
 3. notes skal kun inneholde informasjon som er spesifikk for akkurat den ene hendelsen/oppgaven.
 4. Hvis et dokument beskriver flere hendelser eller gjøremål, lag ett item per hendelse/gjøremål.
