@@ -50,7 +50,7 @@ interface ParentDayItem {
   notes: string[];
 }
 
-const SYSTEM_PROMPT = `Du analyserer bilder av beskjeder, invitasjoner, skjermbilder og dokumenter for norske foreldre.
+export const SYSTEM_PROMPT = `Du analyserer bilder av beskjeder, invitasjoner, skjermbilder og dokumenter for norske foreldre.
 Les all synlig tekst og ekstraher alle hendelser og gjøremål.
 
 Svar med ETT JSON-objekt (ingen markdown-kodeblokker) med nøyaktig dette skjemaet:
