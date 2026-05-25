@@ -79,7 +79,7 @@ Bruk "event" når innholdet har et definert tidsvindu (dato + eventuelt klokkesl
     "school": "skolenavn eller null",
     "targetGroup": "barn | foreldre | familie | null"
   },
-  "recurrence": "daily | weekly | monthly | null",
+  "recurrence": "daily | weekly | monthly | null — se regel 11",
   "transport": {
     "needed": true,
     "hints": ["liste med hint fra dokumentet"]
@@ -119,7 +119,8 @@ Hvis et dokument beskriver en hendelse OG har én eller flere slike handlinger, 
 7. transport.needed: sett true hvis dokumentet antyder at barn må leveres/hentes eller at transport er nødvendig.
 8. Dato-regel for ukeplaner: hvis kilden har uke-nummer (f.eks. "Uke 13") og ukedager, beregn eksakt dato med ISO-uke (mandag = dag 1 i uken; uke 1 = uken med årets første torsdag). Bruk årstall fra kilden, eller inneværende år hvis mangler.
 9. Hvis bildet ikke inneholder lesbar tekst, returner { "version": "2.0.0", "items": [] }.
-10. «Oppmøte»-tider (møtested/-tid før et arrangement) skal aldri være separate kalenderoppføringer. Bruk oppmøtetiden som start (det er den relevante tiden for foreldre), og beskriv begge tidspunkter i notes. Eksempel: «Oppmøte kl. 09:30, kamp kl. 10:00» → start: "09:30", notes: "Oppmøte 09:30, kamp starter 10:00".`;
+10. recurrence: sett «weekly» når dokumentet bruker flertallsukedag eller «hver uke» — f.eks. «tirsdager», «mandager og onsdager», «hver tirsdag», «ukentlig»; sett «monthly» ved «hver måned», «månedlig»; sett «daily» ved «daglig», «hver dag». Eksempel: «tirsdager kl. 17:00–18:00 fra 3. juni til 26. august» → recurrence: "weekly", start: "17:00", end: "18:00". Legg gjerne sesongperioden (f.eks. «3. juni – 26. august») i notes. Sett null når hendelsen er engangs.
+11. «Oppmøte»-tider (møtested/-tid før et arrangement) skal aldri være separate kalenderoppføringer. Bruk oppmøtetiden som start (det er den relevante tiden for foreldre), og beskriv begge tidspunkter i notes. Eksempel: «Oppmøte kl. 09:30, kamp kl. 10:00» → start: "09:30", notes: "Oppmøte 09:30, kamp starter 10:00".`;
 
 function toDataUrl(image: string): string {
   if (image.startsWith("data:")) return image;
